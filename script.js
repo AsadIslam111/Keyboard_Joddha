@@ -2,17 +2,24 @@ const wordsList = [
     "the", "be", "of", "and", "a", "to", "in", "he", "have", "it", "that", "for", "they", "i", "with", "as", "not", "on", "she", "at", "by", "this", "we", "you", "do", "but", "from", "or", "which", "one", "would", "all", "will", "there", "say", "who", "make", "when", "can", "more", "if", "no", "man", "out", "other", "so", "what", "time", "up", "go", "about", "than", "into", "could", "state", "only", "new", "year", "some", "take", "come", "these", "know", "see", "use", "get", "like", "then", "first", "any", "work", "now", "may", "such", "give", "over", "think", "most", "even", "find", "day", "also", "after", "way", "many", "must", "look", "before", "great", "back", "through", "long", "where", "much", "should", "well", "people", "down", "own", "just", "because", "good", "each", "those", "feel", "seem", "how", "high", "too", "place", "little", "world", "very", "still", "nation", "hand", "old", "life", "tell", "write", "become", "here", "show", "house", "both", "between", "need", "mean", "call", "develop", "under", "last", "right", "move", "thing", "general", "school", "never", "same", "another", "begin", "while", "number", "part", "turn", "real", "leave", "might", "want", "point", "form", "off", "child", "few", "small", "since", "against", "ask", "late", "home", "interest", "large", "person", "end", "open", "public", "follow", "during", "present", "without", "again", "hold", "govern", "around", "possible", "head", "consider", "word", "program", "problem", "however", "lead", "system", "set", "order", "eye", "plan", "run", "keep", "face", "fact", "group", "play", "stand", "increase", "early", "course", "change", "help", "line"
 ];
 
-const CONFIG = {
-    timeLimit: 30,
-    wordCount: 100
+let CONFIG = {
+    mode: 'time', // 'time' or 'words'
+    value: 30, // 30/60 seconds or 25/50 words
+    wordCount: 100 // Default buffer for time mode
 };
+
+// Persistent storage for mistakes across sessions
+let mistakeHistory = { characters: {}, words: {} };
+let keyStats = {}; // { "a": { total: 0, wrong: 0 } }
+window.keyStats = keyStats; // Expose for verification
 
 let state = {
     words: [],
     wordIndex: 0,
     charIndex: 0,
     startTime: null,
-    timeRemaining: CONFIG.timeLimit,
+    timeElapsed: 0,
+    timeRemaining: 30,
     timer: null,
     isTyping: false,
     correctChars: 0,
@@ -23,41 +30,62 @@ let state = {
 // DOM Elements
 const wordsDiv = document.getElementById('words');
 const timerEl = document.getElementById('timer');
-const wpmEl = document.getElementById('wpm');
-const typingArea = document.getElementById('typing-area');
+const modeSelect = document.getElementById('mode-select');
+const hiddenInput = document.getElementById('hidden-input');
 const caret = document.getElementById('caret');
+const resultOverlay = document.getElementById('result-overlay');
 const restartBtn = document.getElementById('restart-btn');
-const overlay = document.getElementById('result-overlay');
-const restartOverlayBtn = document.getElementById('restart-overlay-btn');
-// Result Els
-const finalWpmEl = document.getElementById('final-wpm');
-const finalAccEl = document.getElementById('final-acc');
-const finalCharsEl = document.getElementById('final-chars');
+const wpmEl = document.getElementById('wpm');
+const accEl = document.getElementById('acc');
+const errorsEl = document.getElementById('errors');
 
-function initGame() {
-    clearInterval(state.timer);
-    state = {
-        words: generateWords(),
-        wordIndex: 0,
-        charIndex: 0,
-        startTime: null,
-        timeRemaining: CONFIG.timeLimit,
-        timer: null,
-        isTyping: false,
-        correctChars: 0,
-        incorrectChars: 0,
-        totalCharsTyped: 0
-    };
+// --- Helper Functions ---
 
-    timerEl.innerText = CONFIG.timeLimit;
-    wpmEl.innerText = '0';
-    overlay.classList.add('hidden');
-    typingArea.focus();
-    renderWords();
-    updateCaretPosition();
+function parseMode() {
+    const val = modeSelect.value;
+
+    if (val === 'weak-words') {
+        CONFIG.mode = 'weak';
+        CONFIG.value = 25; // Default to 25 words for weak mode
+        CONFIG.wordCount = 25;
+    } else {
+        const parts = val.split('-');
+        CONFIG.mode = parts[0];
+        CONFIG.value = parseInt(parts[1]);
+
+        if (CONFIG.mode === 'time') {
+            CONFIG.wordCount = 100; // Buffer
+        } else {
+            CONFIG.wordCount = CONFIG.value; // Exact count
+        }
+    }
 }
 
 function generateWords() {
+    if (CONFIG.mode === 'weak') {
+        const sortedWords = Object.entries(mistakeHistory.words)
+            .sort((a, b) => b[1] - a[1])
+            .map(entry => entry[0]);
+
+        let list = [];
+
+        for (let w of sortedWords) {
+            if (list.length >= CONFIG.wordCount) break;
+            list.push(w);
+        }
+
+        while (list.length < CONFIG.wordCount) {
+            list.push(wordsList[Math.floor(Math.random() * wordsList.length)]);
+        }
+
+        for (let i = list.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [list[i], list[j]] = [list[j], list[i]];
+        }
+
+        return list;
+    }
+
     const list = [];
     for (let i = 0; i < CONFIG.wordCount; i++) {
         list.push(wordsList[Math.floor(Math.random() * wordsList.length)]);
@@ -78,182 +106,314 @@ function renderWords() {
         });
         wordsDiv.appendChild(wordDiv);
     });
+
+    if (wordsDiv.children.length > 0 && wordsDiv.children[0].children.length > 0) {
+        wordsDiv.children[0].children[0].classList.add('active');
+    }
 }
 
-function startTimer() {
+function resetTest() {
+    clearInterval(state.timer);
+    parseMode();
+
+    state = {
+        words: generateWords(),
+        wordIndex: 0,
+        charIndex: 0,
+        startTime: null,
+        timeElapsed: 0,
+        timeRemaining: CONFIG.mode === 'time' ? CONFIG.value : 0,
+        timer: null,
+        isTyping: false,
+        correctChars: 0,
+        incorrectChars: 0,
+        totalCharsTyped: 0
+    };
+
+    timerEl.innerText = CONFIG.mode === 'time' ? state.timeRemaining : 0;
+    wpmEl.innerText = '0';
+    accEl.innerText = '100%';
+    errorsEl.innerText = '0';
+    document.getElementById('insights').innerHTML = ''; // Clear insights on reset
+
+    resultOverlay.classList.add('hidden');
+    hiddenInput.value = '';
+    hiddenInput.focus();
+    renderWords();
+    updateCaretPosition();
+}
+
+function startTest() {
     if (!state.isTyping) {
         state.isTyping = true;
         state.startTime = Date.now();
         state.timer = setInterval(() => {
-            state.timeRemaining--;
-            timerEl.innerText = state.timeRemaining;
-
-            // Calculate WPM on the fly
-            const elapsed = (30 - state.timeRemaining) / 60;
-            // Standard WPM: (all typed chars / 5) / time in minutes
-            // But usually for live WPM we might want only correct ones or raw
-            const wpm = Math.round((state.correctChars / 5) / (elapsed || 0.001));
-            wpmEl.innerText = wpm;
-
-            if (state.timeRemaining <= 0) {
-                endGame();
+            if (CONFIG.mode === 'time') {
+                state.timeRemaining--;
+                timerEl.innerText = state.timeRemaining;
+                if (state.timeRemaining <= 0) {
+                    endGame();
+                }
+            } else {
+                state.timeElapsed++;
+                timerEl.innerText = state.timeElapsed;
             }
+            updateStats();
         }, 1000);
     }
 }
 
-function endGame() {
-    clearInterval(state.timer);
-    state.isTyping = false;
-    overlay.classList.remove('hidden');
-
-    const timeSpent = (CONFIG.timeLimit - state.timeRemaining) / 60; // should be 0.5 usually
-    // Final WPM calc
-    // Net WPM = ((All Pairs - Uncorrected Errors) / 5) / Time
-    // Simplifying to: (Correct Chars / 5) / Time
-    const wpm = Math.round((state.correctChars / 5) / (0.5)); // Fixed 30s
-    const acc = state.totalCharsTyped > 0 ? Math.round((state.correctChars / state.totalCharsTyped) * 100) : 0;
-
-    finalWpmEl.innerText = wpm;
-    finalAccEl.innerText = acc + '%';
-    finalCharsEl.innerText = `${state.correctChars}/${state.incorrectChars}/${0}/${0}`;
-    // Format: Correct / Incorrect / Extra / Missed (Simplified for now)
+function calculateWPM() {
+    let timeInMinutes;
+    if (CONFIG.mode === 'time') {
+        timeInMinutes = (CONFIG.value - state.timeRemaining) / 60;
+    } else {
+        const now = Date.now();
+        const diffSec = (now - state.startTime) / 1000;
+        timeInMinutes = diffSec / 60;
+    }
+    return Math.round((state.correctChars / 5) / (timeInMinutes || 0.001));
 }
 
-// Input Handling
-window.addEventListener('keydown', (e) => {
-    // Shortcuts
-    if (e.key === 'Tab') {
+function calculateAccuracy() {
+    return state.totalCharsTyped > 0 ? Math.round((state.correctChars / state.totalCharsTyped) * 100) : 100;
+}
+
+function updateStats() {
+    const wpm = calculateWPM();
+    const acc = calculateAccuracy();
+
+    wpmEl.innerText = wpm;
+    accEl.innerText = acc + '%';
+    errorsEl.innerText = state.incorrectChars;
+}
+
+function handleInput(e) {
+    const key = e.key;
+
+    if (key === 'Tab') {
         e.preventDefault();
-        initGame();
+        resetTest();
         return;
     }
 
-    if (overlay.classList.contains('hidden') === false) {
-        // Overlay is open
-        if (e.key === 'Enter' || e.key === ' ') {
-            initGame();
-        }
+    if (!resultOverlay.classList.contains('hidden')) {
+        if (key === 'Enter') resetTest();
         return;
     }
 
-    // Ignore non-printable keys unless backspace
     if (e.ctrlKey || e.altKey || e.metaKey) return;
-    if (e.key.length !== 1 && e.key !== 'Backspace') return;
+    if (key.length !== 1 && key !== 'Backspace' && key !== ' ') return;
 
-    if (!state.isTyping && state.timeRemaining > 0) {
-        startTimer();
+    if (!state.isTyping) {
+        startTest();
     }
+
+    e.preventDefault();
 
     const currentWordDiv = wordsDiv.children[state.wordIndex];
-    if (!currentWordDiv) return; // End of list
+    if (!currentWordDiv) return;
 
     const currentWordStr = state.words[state.wordIndex];
 
-    if (e.key === 'Backspace') {
-        // Handle Backspace
+    if (key === 'Backspace') {
         if (state.charIndex > 0) {
             state.charIndex--;
             const charSpan = currentWordDiv.children[state.charIndex];
-            // Revert status
             if (charSpan.classList.contains('correct')) state.correctChars--;
             if (charSpan.classList.contains('incorrect')) state.incorrectChars--;
-
             charSpan.className = 'letter';
-        } else if (state.wordIndex > 0) {
-            // Check if we can go back to previous word
-            // Usually type racers don't allow going back to previous word if space was pressed? 
-            // Monkeytype DOES allow it. Complex logic.
-            // Simplified: Block going back to previous word for MVP to keep logic simple
+        }
+    } else if (key === ' ') {
+        if (CONFIG.mode === 'words' && state.wordIndex === CONFIG.wordCount - 1) {
+            endGame();
+            return;
+        }
+        if (CONFIG.mode === 'weak' && state.wordIndex === CONFIG.wordCount - 1) {
+            endGame();
+            return;
+        }
+
+        state.wordIndex++;
+        state.charIndex = 0;
+
+        if (state.wordIndex >= state.words.length) {
+            if (CONFIG.mode === 'words' || CONFIG.mode === 'weak') {
+                endGame();
+            }
+            return;
         }
     } else {
-        // Handle Character
+        if (state.charIndex < currentWordDiv.children.length) {
+            const charSpan = currentWordDiv.children[state.charIndex];
 
-        // Handle Space -> Next Word
-        if (e.key === ' ') {
-            e.preventDefault(); // Prevent scrolling
-            if (state.charIndex === 0) return; // Don't skip if nothing typed (optional choice)
+            // Track Key Stats
+            if (!keyStats[key]) keyStats[key] = { total: 0, wrong: 0 };
+            keyStats[key].total++;
 
-            // Mark remaining letters as missed (optional, usually monkeytype just ignores or marks red)
-            // Move to next word
-            state.wordIndex++;
-            state.charIndex = 0;
-
-            // Scroll if needed (Simple scroll logic: if word index is high enough, scroll div)
-            // For MVP: Check caret position relative to container
-            const wordRect = currentWordDiv.getBoundingClientRect();
-            const containerRect = typingArea.getBoundingClientRect();
-            if (wordRect.top > containerRect.top + 50) {
-                // Scroll Logic could be implemented by filtering `renderWords` or `marginTop`
-                // Let's implement row-based scrolling later if needed.
-                // For now, let's just slide the whole word container up?
-                // Or simple: don't support infinite scrolling yet, just static list.
-                // The hardcoded list is 100 words, might overflow.
-            }
-
-        } else {
-            // Regular Char
-            // Prevent going out of bounds of current word
-            if (state.charIndex < currentWordDiv.children.length) {
-                const charSpan = currentWordDiv.children[state.charIndex];
-                if (e.key === currentWordStr[state.charIndex]) {
-                    charSpan.classList.add('correct');
-                    state.correctChars++;
-                } else {
-                    charSpan.classList.add('incorrect');
-                    state.incorrectChars++;
-                }
-                state.charIndex++;
-                state.totalCharsTyped++;
+            if (key === currentWordStr[state.charIndex]) {
+                charSpan.classList.add('correct');
+                state.correctChars++;
             } else {
-                // Typo extra characters?
-                // Monkeytype handles extra chars. For now, let's just ignore or cap it.
+                charSpan.classList.add('incorrect');
+                state.incorrectChars++;
+
+                // Track Key Wrong
+                keyStats[key].wrong++;
+
+                // Track Mistakes (Global)
+                const targetChar = currentWordStr[state.charIndex];
+                if (targetChar) {
+                    mistakeHistory.characters[targetChar] = (mistakeHistory.characters[targetChar] || 0) + 1;
+                }
+                mistakeHistory.words[currentWordStr] = (mistakeHistory.words[currentWordStr] || 0) + 1;
+            }
+            state.charIndex++;
+            state.totalCharsTyped++;
+
+            if ((CONFIG.mode === 'words' || CONFIG.mode === 'weak') &&
+                state.wordIndex === CONFIG.wordCount - 1 &&
+                state.charIndex === currentWordDiv.children.length) {
+                endGame();
+                return;
             }
         }
     }
+
+    updateStats();
     updateCaretPosition();
-});
+}
 
 function updateCaretPosition() {
     const currentWordDiv = wordsDiv.children[state.wordIndex];
     if (currentWordDiv) {
-        // Since .word is position: relative, logic depends on where caret is.
-        // Caret is in #typing-area (relative).
-        // Word is in #words (static block).
-        // We need the position of the character relative to #typing-area.
-
-        // Easiest is to use getBoundingClientRect for absolute coords and convert to relative
-        const containerRect = typingArea.getBoundingClientRect();
-
+        const containerRect = wordsDiv.parentElement.getBoundingClientRect();
         let targetRect;
 
         if (state.charIndex < currentWordDiv.children.length) {
             const charSpan = currentWordDiv.children[state.charIndex];
             targetRect = charSpan.getBoundingClientRect();
         } else {
-            // End of word, append to last char
             const lastChar = currentWordDiv.children[currentWordDiv.children.length - 1];
-            const rect = lastChar.getBoundingClientRect();
-            // Mock a rect after the last char
-            targetRect = {
-                left: rect.right,
-                top: rect.top,
-                height: rect.height
-            };
+            if (lastChar) {
+                const rect = lastChar.getBoundingClientRect();
+                targetRect = {
+                    left: rect.right,
+                    top: rect.top,
+                    height: rect.height
+                };
+            } else {
+                // Should not happen for non-empty word
+                const rect = currentWordDiv.getBoundingClientRect();
+                targetRect = { left: rect.left, top: rect.top, height: 24 }; // Fallback
+            }
         }
 
         caret.style.left = (targetRect.left - containerRect.left) + 'px';
-        caret.style.top = (targetRect.top - containerRect.top + 5) + 'px'; // +5 adjustment
+        caret.style.top = (targetRect.top - containerRect.top) + 'px';
     }
 }
 
-// Events
-restartBtn.addEventListener('click', initGame);
-restartOverlayBtn.addEventListener('click', initGame);
-window.addEventListener('resize', () => {
-    // Recalculate caret on resize
-    updateCaretPosition();
+// Session History
+let sessionHistory = [];
+window.sessionHistory = sessionHistory;
+
+function generateInsights() {
+    const lines = [];
+
+    // 1. Top Key Errors
+    const topKeys = Object.entries(mistakeHistory.characters)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(e => e[0]);
+
+    if (topKeys.length > 0) {
+        lines.push(`Most errors on: ${topKeys.join(', ')}`);
+    }
+
+    // 2. Weak Words
+    const weakWords = Object.entries(mistakeHistory.words)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(e => e[0]);
+
+    if (weakWords.length > 0) {
+        lines.push(`Weak words: ${weakWords.join(', ')}`);
+    }
+
+    // 3. Trend
+    if (sessionHistory.length >= 2) {
+        const currentParams = sessionHistory[sessionHistory.length - 1];
+        const prevSessions = sessionHistory.slice(Math.max(0, sessionHistory.length - 6), sessionHistory.length - 1);
+
+        if (prevSessions.length > 0) {
+            const avgAcc = prevSessions.reduce((sum, s) => sum + s.accuracy, 0) / prevSessions.length;
+            const diff = currentParams.accuracy - avgAcc;
+
+            if (diff >= 5) {
+                lines.push("Accuracy is significantly up!");
+            } else if (diff <= -5) {
+                lines.push("Accuracy dropped compared to recent average.");
+            }
+        }
+    }
+
+    return lines.join('<br>');
+}
+
+window.endGame = endGame;
+
+function endGame() {
+    clearInterval(state.timer);
+    state.isTyping = false;
+
+    const wpm = calculateWPM();
+    const acc = calculateAccuracy();
+
+    let duration;
+    if (CONFIG.mode === 'time') {
+        duration = CONFIG.value - Math.max(0, state.timeRemaining);
+    } else {
+        duration = state.timeElapsed;
+    }
+
+    const session = {
+        wpm: wpm,
+        accuracy: acc,
+        errors: state.incorrectChars,
+        duration: duration,
+        timestamp: Date.now()
+    };
+
+    sessionHistory.push(session);
+    if (sessionHistory.length > 10) {
+        sessionHistory.shift();
+    }
+
+    const insightsHtml = generateInsights();
+    document.getElementById('insights').innerHTML = insightsHtml;
+
+    resultOverlay.classList.remove('hidden');
+    hiddenInput.blur();
+}
+
+// Event Listeners
+hiddenInput.addEventListener('keydown', handleInput);
+
+document.addEventListener('click', (e) => {
+    if (e.target === modeSelect) return;
+    if (resultOverlay.classList.contains('hidden')) {
+        hiddenInput.focus();
+    }
 });
 
+modeSelect.addEventListener('change', () => {
+    resetTest();
+    hiddenInput.focus();
+});
+
+restartBtn.addEventListener('click', resetTest);
+window.addEventListener('resize', updateCaretPosition);
+
 // Init
-initGame();
+resetTest();
