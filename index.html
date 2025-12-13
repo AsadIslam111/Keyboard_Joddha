@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nordic Type</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Desktop Only Overlay -->
+    <div id="mobile-warning">
+        <h1>Desktop Only</h1>
+        <p>This experience is designed for physical keyboards.</p>
+    </div>
+
+    <div class="app-container">
+        <!-- Header / Stats -->
+        <header>
+            <div class="logo">NordicType</div>
+            <div class="stats-container">
+                <div class="stat-box">
+                    <span class="label">Time</span>
+                    <span class="value" id="timer">30</span>
+                </div>
+                <div class="stat-box">
+                    <span class="label">WPM</span>
+                    <span class="value" id="wpm">0</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Typing Area -->
+        <main>
+            <!-- Visual caret implemented in CSS/JS -->
+            <div class="typing-area" id="typing-area" tabindex="0">
+                <div id="words" class="words"></div>
+                <!-- Hidden cursor element if we do manual positioning, or use CSS roughly -->
+                <div id="caret" class="caret"></div>
+            </div>
+            
+            <div class="controls">
+                <button id="restart-btn" class="icon-btn" title="Restart Test">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>
+                </button>
+            </div>
+        </main>
+
+        <!-- Result Overlay -->
+        <div id="result-overlay" class="hidden">
+            <div class="result-card">
+                <h2>Session Complete</h2>
+                <div class="big-wpm" id="final-wpm">0</div>
+                <div class="detail-stats">
+                    <div class="detail">
+                        <span class="l">Acc</span>
+                        <span class="v" id="final-acc">0%</span>
+                    </div>
+                    <div class="detail">
+                        <span class="l">Chars</span>
+                        <span class="v" id="final-chars">0/0/0/0</span>
+                        <!-- correct/incorrect/extra/missed -->
+                    </div>
+                </div>
+                <button id="restart-overlay-btn" class="primary-btn">Again</button>
+            </div>
+        </div>
+
+        <footer>
+            <p>tab to restart</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
