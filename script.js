@@ -24,8 +24,74 @@ let state = {
     isTyping: false,
     correctChars: 0,
     incorrectChars: 0,
-    totalCharsTyped: 0
+    totalCharsTyped: 0,
+    keystrokeLog: []
 };
+
+// Keyboard Data
+const KEYBOARD_LAYOUT = [
+    ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+    ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+    ['z', 'x', 'c', 'v', 'b', 'n', 'm']
+];
+
+const KEY_FINGER_MAP = {
+    // Left Hand
+    'q': { hand: 'Left', finger: 'Pinky' }, 'a': { hand: 'Left', finger: 'Pinky' }, 'z': { hand: 'Left', finger: 'Pinky' },
+    'w': { hand: 'Left', finger: 'Ring' }, 's': { hand: 'Left', finger: 'Ring' }, 'x': { hand: 'Left', finger: 'Ring' },
+    'e': { hand: 'Left', finger: 'Middle' }, 'd': { hand: 'Left', finger: 'Middle' }, 'c': { hand: 'Left', finger: 'Middle' },
+    'r': { hand: 'Left', finger: 'Index' }, 'f': { hand: 'Left', finger: 'Index' }, 'v': { hand: 'Left', finger: 'Index' },
+    't': { hand: 'Left', finger: 'Index' }, 'g': { hand: 'Left', finger: 'Index' }, 'b': { hand: 'Left', finger: 'Index' },
+
+    // Right Hand
+    'y': { hand: 'Right', finger: 'Index' }, 'h': { hand: 'Right', finger: 'Index' }, 'n': { hand: 'Right', finger: 'Index' },
+    'u': { hand: 'Right', finger: 'Index' }, 'j': { hand: 'Right', finger: 'Index' }, 'm': { hand: 'Right', finger: 'Index' },
+    'i': { hand: 'Right', finger: 'Middle' }, 'k': { hand: 'Right', finger: 'Middle' },
+    'o': { hand: 'Right', finger: 'Ring' }, 'l': { hand: 'Right', finger: 'Ring' },
+    'p': { hand: 'Right', finger: 'Pinky' },
+
+    // Thumbs
+    ' ': { hand: 'Thumb', finger: 'Thumb' }
+};
+
+function renderKeyboard() {
+    const keyboardDiv = document.getElementById('visual-keyboard');
+    keyboardDiv.innerHTML = '';
+
+    KEYBOARD_LAYOUT.forEach(row => {
+        const rowDiv = document.createElement('div');
+        rowDiv.className = 'keyboard-row';
+        row.forEach(key => {
+            const keyDiv = document.createElement('div');
+            keyDiv.className = 'key';
+            keyDiv.id = `key-${key}`;
+            keyDiv.innerText = key;
+            rowDiv.appendChild(keyDiv);
+        });
+        keyboardDiv.appendChild(rowDiv);
+    });
+}
+
+function updateKeyboardHeatmap() {
+    KEYBOARD_LAYOUT.flat().forEach(key => {
+        const keyEl = document.getElementById(`key-${key}`);
+        if (!keyEl) return;
+
+        keyEl.classList.remove('key-high', 'key-mid', 'key-low');
+
+        const stats = keyStats[key];
+        if (stats && stats.total > 0) {
+            const accuracy = (stats.total - stats.wrong) / stats.total;
+            if (accuracy >= 0.9) {
+                keyEl.classList.add('key-high');
+            } else if (accuracy >= 0.7) {
+                keyEl.classList.add('key-mid');
+            } else {
+                keyEl.classList.add('key-low');
+            }
+        }
+    });
+}
 
 // DOM Elements
 const wordsDiv = document.getElementById('words');
@@ -46,7 +112,7 @@ function parseMode() {
 
     if (val === 'weak-words') {
         CONFIG.mode = 'weak';
-        CONFIG.value = 25; // Default to 25 words for weak mode
+        CONFIG.value = 25;
         CONFIG.wordCount = 25;
     } else {
         const parts = val.split('-');
@@ -54,9 +120,9 @@ function parseMode() {
         CONFIG.value = parseInt(parts[1]);
 
         if (CONFIG.mode === 'time') {
-            CONFIG.wordCount = 100; // Buffer
+            CONFIG.wordCount = 100;
         } else {
-            CONFIG.wordCount = CONFIG.value; // Exact count
+            CONFIG.wordCount = CONFIG.value;
         }
     }
 }
@@ -127,14 +193,15 @@ function resetTest() {
         isTyping: false,
         correctChars: 0,
         incorrectChars: 0,
-        totalCharsTyped: 0
+        totalCharsTyped: 0,
+        keystrokeLog: []
     };
 
     timerEl.innerText = CONFIG.mode === 'time' ? state.timeRemaining : 0;
     wpmEl.innerText = '0';
     accEl.innerText = '100%';
     errorsEl.innerText = '0';
-    document.getElementById('insights').innerHTML = ''; // Clear insights on reset
+    document.getElementById('insights').innerHTML = '';
 
     resultOverlay.classList.add('hidden');
     hiddenInput.value = '';
@@ -271,6 +338,12 @@ function handleInput(e) {
             state.charIndex++;
             state.totalCharsTyped++;
 
+            // Log Keystroke for Fatigue Analysis
+            state.keystrokeLog.push({
+                time: Date.now() - state.startTime,
+                isCorrect: key === currentWordStr[state.charIndex - 1] // charIndex was just incremented
+            });
+
             if ((CONFIG.mode === 'words' || CONFIG.mode === 'weak') &&
                 state.wordIndex === CONFIG.wordCount - 1 &&
                 state.charIndex === currentWordDiv.children.length) {
@@ -303,9 +376,8 @@ function updateCaretPosition() {
                     height: rect.height
                 };
             } else {
-                // Should not happen for non-empty word
                 const rect = currentWordDiv.getBoundingClientRect();
-                targetRect = { left: rect.left, top: rect.top, height: 24 }; // Fallback
+                targetRect = { left: rect.left, top: rect.top, height: 24 };
             }
         }
 
@@ -341,7 +413,104 @@ function generateInsights() {
         lines.push(`Weak words: ${weakWords.join(', ')}`);
     }
 
-    // 3. Trend
+    // 3. Hand & Finger Analysis
+    let handStats = { 'Left': { total: 0, wrong: 0 }, 'Right': { total: 0, wrong: 0 } };
+    let fingerStats = {};
+
+    Object.keys(keyStats).forEach(key => {
+        const stats = keyStats[key];
+        if (!stats || stats.total < 1) return;
+
+        const map = KEY_FINGER_MAP[key.toLowerCase()];
+        if (map) {
+            // Hand Stats (ignore Thumbs for L/R comparison)
+            if (map.hand === 'Left' || map.hand === 'Right') {
+                handStats[map.hand].total += stats.total;
+                handStats[map.hand].wrong += stats.wrong;
+            }
+
+            // Finger Stats
+            const fingerName = map.finger === 'Thumb' ? 'Thumb' : `${map.hand} ${map.finger}`;
+            if (!fingerStats[fingerName]) fingerStats[fingerName] = { total: 0, wrong: 0 };
+            fingerStats[fingerName].total += stats.total;
+            fingerStats[fingerName].wrong += stats.wrong;
+        }
+    });
+
+    // Generate Hand Insight
+    const leftTotal = handStats['Left'].total;
+    const rightTotal = handStats['Right'].total;
+
+    // Reduced threshold for easier testing
+    if (leftTotal > 5 && rightTotal > 5) {
+        const leftAcc = (leftTotal - handStats['Left'].wrong) / leftTotal;
+        const rightAcc = (rightTotal - handStats['Right'].wrong) / rightTotal;
+        const diff = Math.abs(leftAcc - rightAcc);
+
+        if (diff > 0.05) { // 5% difference threshold
+            const diffPct = Math.round(diff * 100);
+            if (leftAcc < rightAcc) {
+                lines.push(`Left hand accuracy is ${diffPct}% lower than right hand.`);
+            } else {
+                lines.push(`Right hand accuracy is ${diffPct}% lower than left hand.`);
+            }
+        }
+    }
+
+    // Generate Weakest Finger Insight
+    let weakestFinger = null;
+    let minAcc = 1.0;
+
+    Object.entries(fingerStats).forEach(([finger, stats]) => {
+        if (stats.total > 5) { // Reduced threshold
+            const acc = (stats.total - stats.wrong) / stats.total;
+            if (acc < minAcc) {
+                minAcc = acc;
+                weakestFinger = finger;
+            }
+        }
+    });
+
+    if (weakestFinger && minAcc < 0.95) {
+        lines.push(`${weakestFinger} finger shows the highest error rate.`);
+    }
+
+    // 4. Fatigue Analysis (Time Segments)
+    if (state.keystrokeLog.length > 20) {
+        const totalDuration = state.keystrokeLog[state.keystrokeLog.length - 1].time;
+        const halfDuration = totalDuration / 2;
+
+        const firstHalf = state.keystrokeLog.filter(k => k.time <= halfDuration);
+        const secondHalf = state.keystrokeLog.filter(k => k.time > halfDuration);
+
+        const calcAcc = (log) => {
+            if (log.length === 0) return 0;
+            const correct = log.filter(k => k.isCorrect).length;
+            return correct / log.length;
+        };
+
+        const acc1 = calcAcc(firstHalf);
+        const acc2 = calcAcc(secondHalf);
+
+        if ((acc1 - acc2) > 0.05) { // 5% drop
+            lines.push("Accuracy drops significantly in the second half.");
+        }
+
+        // 40s Threshold
+        if (totalDuration > 40000) { // 40 seconds
+            const earlyPart = state.keystrokeLog.filter(k => k.time <= 40000);
+            const latePart = state.keystrokeLog.filter(k => k.time > 40000);
+
+            const accEarly = calcAcc(earlyPart);
+            const accLate = calcAcc(latePart);
+
+            if ((accEarly - accLate) > 0.05) {
+                lines.push("Accuracy drops after 40 seconds — consider shorter practice sessions.");
+            }
+        }
+    }
+
+    // 5. Trend
     if (sessionHistory.length >= 2) {
         const currentParams = sessionHistory[sessionHistory.length - 1];
         const prevSessions = sessionHistory.slice(Math.max(0, sessionHistory.length - 6), sessionHistory.length - 1);
@@ -393,6 +562,8 @@ function endGame() {
     const insightsHtml = generateInsights();
     document.getElementById('insights').innerHTML = insightsHtml;
 
+    updateKeyboardHeatmap(); // Update visual keyboard
+
     resultOverlay.classList.remove('hidden');
     hiddenInput.blur();
 }
@@ -416,4 +587,5 @@ restartBtn.addEventListener('click', resetTest);
 window.addEventListener('resize', updateCaretPosition);
 
 // Init
+renderKeyboard();
 resetTest();

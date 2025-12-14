@@ -19,8 +19,13 @@
     </div>
 
     <div class="app-container">
-        <!-- Top Bar -->
-        <header class="top-bar">
+        <!-- Minimal Header -->
+        <header class="header">
+            <h1>Keyboard Joddha</h1>
+        </header>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
             <select id="mode-select" class="mode-select">
                 <option value="time-30">Time 30</option>
                 <option value="time-60">Time 60</option>
@@ -29,7 +34,7 @@
                 <option value="weak-words">Weak Words</option>
             </select>
             <div class="timer" id="timer">30</div>
-        </header>
+        </div>
 
         <!-- Center: Typing Area -->
         <main class="center-area">
@@ -42,21 +47,29 @@
                 <div id="caret" class="caret"></div>
             </div>
 
-            <!-- Result Overlay (simplified, maybe just replace text or show below) -->
+            <!-- Result Overlay -->
             <div id="result-overlay" class="hidden">
-                <h2>Finished</h2>
-                <button id="restart-btn">Restart</button>
+                <div class="result-box">
+                    <div class="result-title">Test Complete</div>
+                    <div class="result-stats">
+                        <div>WPM: <span id="wpm">0</span></div>
+                        <div>Acc: <span id="acc">100%</span></div>
+                        <div>Errors: <span id="errors">0</span></div>
+                    </div>
+                    <div id="insights"></div>
+                    <button id="restart-btn">Restart</button>
+                </div>
             </div>
         </main>
 
-        <!-- Bottom: Stats -->
-        <footer class="bottom-bar">
-            <div class="result-stats">
-                <div>WPM: <span id="wpm">0</span></div>
-                <div>Acc: <span id="acc">100%</span></div>
-                <div>Errors: <span id="errors">0</span></div>
+        <!-- Visual Keyboard -->
+        <div id="visual-keyboard" class="keyboard"></div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="shortcuts">
+                <span>Tab: Restart</span>
             </div>
-            <div id="insights"></div>
         </footer>
     </div>
 
