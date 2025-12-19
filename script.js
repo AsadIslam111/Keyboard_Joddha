@@ -239,6 +239,8 @@ function resetTest() {
         isTyping: false,
         correctChars: 0,
         incorrectChars: 0,
+        completedCorrectChars: 0,
+        completedIncorrectChars: 0,
         totalCharsTyped: 0,
         keystrokeLog: [],
         phoneticBuffer: '',
@@ -349,11 +351,20 @@ function handleInput(e) {
                 Array.from(currentWordDiv.children).forEach(span => span.className = 'letter');
 
                 const len = Math.min(converted.length, currentWordStr.length);
+                let matchLen = 0;
                 for (let i = 0; i < len; i++) {
                     const span = currentWordDiv.children[i];
-                    if (converted[i] === currentWordStr[i]) span.classList.add('correct');
-                    else span.classList.add('incorrect');
+                    if (converted[i] === currentWordStr[i]) {
+                        span.classList.add('correct');
+                        matchLen++;
+                    } else {
+                        span.classList.add('incorrect');
+                    }
                 }
+
+                const mismatchLen = converted.length - matchLen;
+                state.correctChars = state.completedCorrectChars + matchLen;
+                state.incorrectChars = state.completedIncorrectChars + mismatchLen;
             }
         } else {
             if (state.charIndex > 0) {
@@ -375,6 +386,19 @@ function handleInput(e) {
         }
 
         if (CONFIG.language === 'bangla') {
+            // Calculate final correctness for the completed word
+            const currentWordStr = state.words[state.wordIndex];
+            const converted = state.convertedBuffer;
+            let matchLen = 0;
+            const len = Math.min(converted.length, currentWordStr.length);
+            for (let i = 0; i < len; i++) {
+                if (converted[i] === currentWordStr[i]) matchLen++;
+            }
+            const mismatchLen = converted.length - matchLen;
+
+            state.completedCorrectChars += matchLen;
+            state.completedIncorrectChars += mismatchLen;
+
             state.phoneticBuffer = '';
             state.convertedBuffer = '';
         }
@@ -429,67 +453,10 @@ function handleInput(e) {
             // Sync charIndex for cursor and logic
             state.charIndex = converted.length;
 
-            // Update Stats (Approximation: 1 correct Bangla char = 1 hit)
-            // Note: This differs from keyStats. We might track raw keys vs parsed chars.
-            // For simplicity, we update based on current correct count.
-            // Recalculate correctChars for this word:
-            // We need to track delta. 
-            // Simpler: state.correctChars is global. 
-            // We should only increment if we *just* typed a correct char.
-            // But conversion changes "past" characters potentially (e.g. 'k'->'kh').
-            // So we really should recalculate correctChars from scratch? 
-            // No, that messes up WPM history.
-
-            // Alternative: On every keypress, we re-evaluate the *entire* word's correctness.
-            // But we can't easily undo `state.correctChars` from previous keypresses if they changed.
-            // Actually, `correctChars` is just a counter. 
-            // Let's assume for Bangla mode:
-            // WPM = (Total Correct Key strokes? Or Total Correct Output Chars?)
-            // Usually WPM = (Characters / 5).
-            // Let's stick to: count raw key presses as `totalCharsTyped`.
-            // Count `correctChars` based on matching Bangla characters?
-            // If I type 'k' (1 key) -> 'ক' (1 char). Correct.
-            // If I type 'h' (2 keys total) -> 'খ' (1 char). Correct.
-            // Converting 2 keys to 1 char makes WPM calculation tricky if we count output chars.
-            // Let's count *output* characters for Accuracy/WPM in Bangla mode?
-            // Or just stick to standard typing test rules: every correct keystroke counts.
-            // But we don't know which keystroke was "correct" in a phonetic map.
-
-            // HYBRID APPROACH:
-            // `state.totalCharsTyped` increments on every key press (done below).
-            // `state.correctChars`: We'll update it by diffing the number of correct chars in the current word vs previous state.
-            // Actually, simpler: Just COUNT current correct chars in the word, subtract previous count for this word, add to global.
-            // We need `state.currentWordCorrectChars`.
-
-            // Allow simplified logic for now:
-            // 1 key press = +1 total char.
-            // If the key press result in a *valid prefix* match, +1 correct char?
-            // Let's just blindly increment `totalCharsTyped` for every key.
-            // And increment `correctChars` only if the *new* converted string matches the target prefix better?
-            // Too complex.
-
-            // LET'S USE A SIMPLER METRIC:
-            // Just count matches in the `converted` string.
-            // But we can't "un-count" global stats easily.
-            // So on 'Backspace' we need to handle it.
-
-            // Actually, let's just ignore precise char stats for this complex phonetic mode for now 
-            // and just ensure the visual highlighting works.
-            // `state.correctChars` is displayed in WPM.
-            // Let's update `state.correctChars` to be: sum of all fully correct words chars + current word correct chars.
-            // This requires tracking completed words separately.
-
-            // QUICK FIX for Stats:
-            // We won't perfectly track WPM in this session for Bangla without a refactor.
-            // We will just increment `totalCharsTyped`.
-            // We will NOT update `correctChars` incrementally here. 
-            // Instead, we will count correct characters in `endGame` or `updateStats` by iterating words?
-            // Too slow.
-
-            // Let's try: `state.correctChars` = (Completed Words Length) + (Current Word Match Length).
-            // We calculate this every keystroke.
-            // To do this, we need `state.completedCorrectChars` variable.
-
+            // Update Stats
+            const mismatchLen = converted.length - matchLen;
+            state.correctChars = state.completedCorrectChars + matchLen;
+            state.incorrectChars = state.completedIncorrectChars + mismatchLen;
         } else {
             // Standard Character-by-Character Logic
             if (state.charIndex < currentWordDiv.children.length) {
