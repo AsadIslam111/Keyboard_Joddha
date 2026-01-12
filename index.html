@@ -11,6 +11,8 @@
         href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link href="style.css" rel="stylesheet">
+    <link href="suggestion.css" rel="stylesheet">
+    <script src="firebase_config.js" defer></script>
     <script src="phonetic_engine.js" defer></script>
     <script src="script.js" defer></script>
 </head>
@@ -20,6 +22,28 @@
     <!-- Desktop Only Overlay -->
     <div id="mobile-warning">
         <h1>Desktop Only</h1>
+    </div>
+
+    <!-- User Profile (Absolute Top Right) -->
+    <div id="user-profile" class="user-profile">
+        <!-- Logged Out State -->
+        <button id="login-btn" class="auth-btn">
+            <span class="g-icon">G</span> Sign In
+        </button>
+
+        <!-- Logged In State (Hidden by default) -->
+        <div id="auth-info" class="auth-info hidden">
+            <img id="user-avatar" src="" alt="User" class="avatar">
+            <span id="user-name" class="username"></span>
+            <button id="logout-btn" class="logout-btn" title="Sign Out">
+                <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                    <path
+                        d="M10 12.5a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5h8a.5.5 0 0 1 .5.5v2a.5.5 0 0 0 1 0v-2A1.5 1.5 0 0 0 9.5 2h-8A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h8a1.5 1.5 0 0 0 1.5-1.5v-2a.5.5 0 0 0-1 0v2z" />
+                    <path
+                        d="M15.854 8.354a.5.5 0 0 0 0-.708l-3-3a.5.5 0 0 0-.708.708L14.293 7.5H5.5a.5.5 0 0 0 0 1h8.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3z" />
+                </svg>
+            </button>
+        </div>
     </div>
 
     <div class="app-container">
@@ -63,6 +87,7 @@
                 <!-- Words will be injected here -->
                 <div id="words" class="words"></div>
                 <div id="caret" class="caret"></div>
+
             </div>
 
             <!-- Result Overlay -->
@@ -91,6 +116,7 @@
         </footer>
     </div>
 
+    <div id="suggestion-box" class="suggestion-box hidden"></div>
 
 </body>
 

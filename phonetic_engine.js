@@ -66,7 +66,45 @@ class BanglaPhoneticEngine {
     }
 
     /**
-     * Converts phonetic English text to Bangla Unicode.
+     * Converts phonetic English text to Bangla using Google Input Tools API (Async).
+     * Uses JSONP to bypass CORS.
+     */
+    async convertGoogle(text) {
+        if (!text) return "";
+
+        // Cache Check
+        if (!this.cache) this.cache = {};
+        if (this.cache[text]) return this.cache[text];
+
+        return new Promise((resolve, reject) => {
+            const callbackName = 'google_input_callback_' + Math.round(100000 * Math.random());
+
+            // Define global callback
+            window[callbackName] = (data) => {
+                delete window[callbackName];
+                document.body.removeChild(script);
+                if (data && data[1] && data[1][0] && data[1][0][1]) {
+                    const results = data[1][0][1]; // Array of suggestions
+                    this.cache[text] = results;
+                    resolve(results);
+                } else {
+                    resolve([this.convert(text)]); // Fallback to local (as array)
+                }
+            };
+
+            const script = document.createElement('script');
+            script.src = `https://inputtools.google.com/request?text=${encodeURIComponent(text)}&itc=bn-t-i0-und&num=5&cp=0&cs=1&ie=utf-8&oe=utf-8&app=demopage&cb=${callbackName}`;
+            script.onerror = () => {
+                delete window[callbackName];
+                document.body.removeChild(script);
+                resolve([this.convert(text)]); // Fallback on error
+            };
+            document.body.appendChild(script);
+        });
+    }
+
+    /**
+     * Legacy Synchronous Convert (Local Fallback)
      */
     convert(text) {
         let output = '';

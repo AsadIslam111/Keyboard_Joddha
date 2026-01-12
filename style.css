@@ -102,7 +102,89 @@ body {
 .mode-select:hover,
 .mode-select:focus {
     color: var(--accent-color);
+    color: var(--accent-color);
     outline: none;
+}
+
+/* User Profile Section (Absolute Top Right) */
+.user-profile {
+    position: absolute;
+    top: 25px;
+    right: 30px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    z-index: 1000;
+}
+
+.auth-btn {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid #444;
+    padding: 6px 14px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s;
+}
+
+.auth-btn:hover {
+    border-color: var(--accent-color);
+    color: var(--text-primary);
+}
+
+.g-icon {
+    font-weight: bold;
+    display: none;
+    /* Minimalist icon style */
+}
+
+/* Show Google Icon only if desired, but user asked for "Same Look" */
+/* Let's keep it subtle */
+
+.auth-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.auth-info.hidden {
+    display: none;
+}
+
+.avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid var(--accent-color);
+}
+
+.username {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    max-width: 100px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.logout-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: color 0.2s;
+}
+
+.logout-btn:hover {
+    color: var(--error-color);
 }
 
 .timer {
@@ -335,4 +417,46 @@ body {
     background: #333;
     padding: 4px 8px;
     border-radius: 4px;
+}
+
+/* Insight Tags */
+.insight-tag {
+    display: inline-block;
+    font-size: 0.75rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 8px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tag-default {
+    background-color: #555;
+    color: #fff;
+}
+
+.tag-speed {
+    background-color: #3498db;
+    color: #fff;
+}
+
+.tag-accuracy {
+    background-color: #27ae60;
+    color: #fff;
+}
+
+.tag-fatigue {
+    background-color: #e67e22;
+    color: #fff;
+}
+
+.tag-habit {
+    background-color: #9b59b6;
+    color: #fff;
+}
+
+.tag-lang {
+    background-color: #16a085;
+    color: #fff;
 }

@@ -1,3 +1,7 @@
+// Firebase is loaded via script tag in HTML and exports to window
+let auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged;
+
+
 const wordsList = [
     "the", "be", "of", "and", "a", "to", "in", "he", "have", "it", "that", "for", "they", "i", "with", "as", "not", "on", "she", "at", "by", "this", "we", "you", "do", "but", "from", "or", "which", "one", "would", "all", "will", "there", "say", "who", "make", "when", "can", "more", "if", "no", "man", "out", "other", "so", "what", "time", "up", "go", "about", "than", "into", "could", "state", "only", "new", "year", "some", "take", "come", "these", "know", "see", "use", "get", "like", "then", "first", "any", "work", "now", "may", "such", "give", "over", "think", "most", "even", "find", "day", "also", "after", "way", "many", "must", "look", "before", "great", "back", "through", "long", "where", "much", "should", "well", "people", "down", "own", "just", "because", "good", "each", "those", "feel", "seem", "how", "high", "too", "place", "little", "world", "very", "still", "nation", "hand", "old", "life", "tell", "write", "become", "here", "show", "house", "both", "between", "need", "mean", "call", "develop", "under", "last", "right", "move", "thing", "general", "school", "never", "same", "another", "begin", "while", "number", "part", "turn", "real", "leave", "might", "want", "point", "form", "off", "child", "few", "small", "since", "against", "ask", "late", "home", "interest", "large", "person", "end", "open", "public", "follow", "during", "present", "without", "again", "hold", "govern", "around", "possible", "head", "consider", "word", "program", "problem", "however", "lead", "system", "set", "order", "eye", "plan", "run", "keep", "face", "fact", "group", "play", "stand", "increase", "early", "course", "change", "help", "line"
 ];
@@ -9,8 +13,8 @@ const banglaWords = [
     "সূর্য", "চাঁদ", "আকাশ", "জল", "নদী", "পাহাড়", "প্রকৃতি"
 ];
 
-const banglaEngine = new window.BanglaPhoneticEngine();
-window.banglaEngine = banglaEngine; // Verify access
+let banglaEngine;
+// window.banglaEngine = banglaEngine; // Will be assigned in init
 
 var CONFIG = {
     mode: 'time', // 'time', 'words', or 'bangla'
@@ -39,7 +43,11 @@ let state = {
     totalCharsTyped: 0,
     keystrokeLog: [],
     phoneticBuffer: '', // Stores raw English input for current word in Bangla mode
-    convertedBuffer: '' // Stores converted Bangla text for current word
+    keystrokeLog: [],
+    phoneticBuffer: '', // Stores raw English input for current word in Bangla mode
+    convertedBuffer: '', // Stores converted Bangla text for current word
+    suggestions: [], // Array of current suggestions
+    suggestionIndex: 0 // Currently selected index
 };
 
 // Keyboard Data
@@ -108,18 +116,11 @@ function updateKeyboardHeatmap() {
 }
 
 // DOM Elements
-const wordsDiv = document.getElementById('words');
-const timerEl = document.getElementById('timer');
-const modeSelect = document.getElementById('mode-select');
-const hiddenInput = document.getElementById('hidden-input');
-const caret = document.getElementById('caret');
-const resultOverlay = document.getElementById('result-overlay');
-const restartBtn = document.getElementById('restart-btn');
-const wpmEl = document.getElementById('wpm');
-const accEl = document.getElementById('acc');
-const errorsEl = document.getElementById('errors');
-let langEnBtn;
-let langBnBtn;
+// DOM Elements (Initialized in init)
+// DOM Elements (Initialized in init)
+let wordsDiv, timerEl, modeSelect, hiddenInput, caret, resultOverlay, restartBtn, wpmEl, accEl, errorsEl, langEnBtn, langBnBtn, suggestionBox;
+
+
 
 // --- Helper Functions ---
 
@@ -222,6 +223,7 @@ function renderWords() {
     if (wordsDiv.children.length > 0 && wordsDiv.children[0].children.length > 0) {
         wordsDiv.children[0].children[0].classList.add('active');
     }
+    document.body.style.borderTop = "5px solid blue"; // DEBUG: Words Rendered
 }
 
 function resetTest() {
@@ -306,6 +308,44 @@ function updateStats() {
 function handleInput(e) {
     const key = e.key;
 
+    // --- Bangla Suggestion Navigation ---
+    if (CONFIG.language === 'bangla' && !suggestionBox.classList.contains('hidden') && state.suggestions.length > 0) {
+        if (key === 'ArrowDown') {
+            e.preventDefault();
+            state.suggestionIndex = (state.suggestionIndex + 1) % state.suggestions.length;
+            renderSuggestions(state.suggestions);
+
+            // Preview selected
+            const candidate = state.suggestions[state.suggestionIndex];
+            state.convertedBuffer = candidate;
+            renderBanglaBuffer(candidate);
+            updateCaretPosition();
+            return;
+        }
+        if (key === 'ArrowUp') {
+            e.preventDefault();
+            state.suggestionIndex = (state.suggestionIndex - 1 + state.suggestions.length) % state.suggestions.length;
+            renderSuggestions(state.suggestions);
+
+            // Preview selected
+            const candidate = state.suggestions[state.suggestionIndex];
+            state.convertedBuffer = candidate;
+            renderBanglaBuffer(candidate);
+            updateCaretPosition();
+            return;
+        }
+        if (key === 'Enter') {
+            e.preventDefault();
+            selectSuggestion(state.suggestionIndex);
+            return;
+        }
+        if (key === 'Escape') {
+            e.preventDefault();
+            suggestionBox.classList.add('hidden');
+            return;
+        }
+    }
+
     if (key === 'Tab') {
         e.preventDefault();
         resetTest();
@@ -340,22 +380,42 @@ function handleInput(e) {
                 // Let's DRY this by extracting "processBanglaInput"
 
                 // ...Actually, simpler inline for now to avoid refactoring huge blocks.
+                // Async Backspace Update
+                // First: Local fast update
                 const converted = banglaEngine.convert(state.phoneticBuffer);
                 state.convertedBuffer = converted;
                 state.charIndex = converted.length;
 
+                // Re-use rendering logic (inline for now, ideally refactor)
                 const currentWordStr = state.words[state.wordIndex];
                 const currentWordDiv = wordsDiv.children[state.wordIndex];
                 Array.from(currentWordDiv.children).forEach(span => span.className = 'letter');
-
                 const len = Math.min(converted.length, currentWordStr.length);
                 for (let i = 0; i < len; i++) {
                     const span = currentWordDiv.children[i];
                     if (converted[i] === currentWordStr[i]) span.classList.add('correct');
                     else span.classList.add('incorrect');
                 }
+
+                // Second: Google Update (Debounced slightly preferred but just fire it)
+                banglaEngine.convertGoogle(state.phoneticBuffer).then(googleConverted => {
+                    if (googleConverted !== state.convertedBuffer) {
+                        state.convertedBuffer = googleConverted;
+                        state.charIndex = googleConverted.length;
+                        // Render again
+                        Array.from(currentWordDiv.children).forEach(span => span.className = 'letter');
+                        const gLen = Math.min(googleConverted.length, currentWordStr.length);
+                        for (let i = 0; i < gLen; i++) {
+                            const span = currentWordDiv.children[i];
+                            if (googleConverted[i] === currentWordStr[i]) span.classList.add('correct');
+                            else span.classList.add('incorrect');
+                        }
+                        updateCaretPosition();
+                    }
+                }).catch(() => { });
             }
         } else {
+
             if (state.charIndex > 0) {
                 state.charIndex--;
                 const charSpan = currentWordDiv.children[state.charIndex];
@@ -375,8 +435,18 @@ function handleInput(e) {
         }
 
         if (CONFIG.language === 'bangla') {
+            // Commit current suggestion if list is active
+            if (!suggestionBox.classList.contains('hidden') && state.suggestions.length > 0) {
+                // Already committed to buffer via navigation? Or default top?
+                // selectSuggestion updates convertedBuffer.
+                // Just ensuring we use the current visual buffer.
+                state.convertedBuffer = state.suggestions[state.suggestionIndex] || state.convertedBuffer;
+            }
             state.phoneticBuffer = '';
             state.convertedBuffer = '';
+            state.suggestions = [];
+            state.suggestionIndex = 0;
+            if (suggestionBox) suggestionBox.classList.add('hidden');
         }
 
         state.wordIndex++;
@@ -413,36 +483,34 @@ function handleInput(e) {
             // 1. Process Input into Buffer
             state.phoneticBuffer += key;
 
-            // 2. Convert Buffer to Bangla
-            const converted = banglaEngine.convert(state.phoneticBuffer);
+            // 2. Convert Buffer
+            // Optimistic Update (Local Engine returns string)
+            let converted = banglaEngine.convert(state.phoneticBuffer);
             state.convertedBuffer = converted;
 
-            // 3. Compare with Target
-            const currentWordStr = state.words[state.wordIndex];
-            const currentWordDiv = wordsDiv.children[state.wordIndex];
+            renderBanglaBuffer(converted);
 
-            // Reset highlighting for this word
-            Array.from(currentWordDiv.children).forEach(span => span.className = 'letter');
+            // Async Update (Google Input Tools)
+            const requestText = state.phoneticBuffer;
+            banglaEngine.convertGoogle(requestText).then(results => {
+                // Race Condition Check
+                if (state.phoneticBuffer === requestText) {
+                    if (Array.isArray(results) && results.length > 0) {
+                        state.suggestions = results;
+                        state.suggestionIndex = 0;
 
-            let matchLen = 0;
-            const len = Math.min(converted.length, currentWordStr.length);
+                        // Default to top result
+                        if (results[0] !== state.convertedBuffer) {
+                            state.convertedBuffer = results[0];
+                            renderBanglaBuffer(results[0]);
+                        }
 
-            for (let i = 0; i < len; i++) {
-                const charSpan = currentWordDiv.children[i];
-                if (converted[i] === currentWordStr[i]) {
-                    charSpan.classList.add('correct');
-                    matchLen++;
-                } else {
-                    charSpan.classList.add('incorrect');
+                        // Render UI
+                        renderSuggestions(results);
+                        updateCaretPosition();
+                    }
                 }
-            }
-
-            // Handle overflow (converted longer than target)
-            if (converted.length > currentWordStr.length) {
-                // Could act as incorrect chars.
-            }
-
-            state.charIndex = converted.length;
+            }).catch(e => console.warn(e));
 
         } else {
             // Standard Character-by-Character Logic
@@ -536,12 +604,107 @@ function updateCaretPosition() {
     }
 }
 
+function renderSuggestions(list) {
+    if (!suggestionBox) return;
+
+    if (!list || list.length === 0 || state.phoneticBuffer.length === 0) {
+        suggestionBox.classList.add('hidden');
+        return;
+    }
+
+    suggestionBox.innerHTML = '';
+
+    // Position Update
+    // Align with caret (Global Positioning)
+    const caretRect = caret.getBoundingClientRect();
+
+    // Calculate position relative to document
+    const top = caretRect.bottom + window.scrollY + 5;
+    const left = caretRect.left + window.scrollX;
+
+    suggestionBox.style.fixed = ''; // Ensure not fixed context if changed
+    suggestionBox.style.left = left + 'px';
+    suggestionBox.style.top = top + 'px';
+
+    list.forEach((item, index) => {
+        const div = document.createElement('div');
+        div.className = 'suggestion-item';
+        if (index === state.suggestionIndex) div.classList.add('active');
+
+        // Use numbers 1-5 for shortcuts if we wanted, for now just index
+        div.innerHTML = `<span class="suggestion-index">${index + 1}</span>${item}`;
+
+        // Click to select
+        div.onclick = () => {
+            selectSuggestion(index);
+            hiddenInput.focus();
+        };
+
+        // Hover to preview (match keyboard behavior)
+        div.onmouseenter = () => {
+            state.suggestionIndex = index;
+            // Update visuals
+            Array.from(suggestionBox.children).forEach((child, i) => {
+                if (i === index) child.classList.add('active');
+                else child.classList.remove('active');
+            });
+            // Update preview in editor
+            const candidate = state.suggestions[index];
+            state.convertedBuffer = candidate;
+            renderBanglaBuffer(candidate);
+            updateCaretPosition();
+        };
+
+        suggestionBox.appendChild(div);
+    });
+
+    suggestionBox.classList.remove('hidden');
+}
+
+function selectSuggestion(index) {
+    if (!state.suggestions || !state.suggestions[index]) return;
+
+    const selected = state.suggestions[index];
+    state.convertedBuffer = selected;
+
+    renderBanglaBuffer(selected);
+    state.suggestions = []; // Clear suggestions
+    suggestionBox.classList.add('hidden');
+}
+
+// Extracted helper to avoid scope issues
+function renderBanglaBuffer(text) {
+    const currentWordStr = state.words[state.wordIndex];
+
+    const div = wordsDiv.children[state.wordIndex];
+    if (!div) return;
+
+    // Reset highlighting for this word
+    Array.from(div.children).forEach(span => span.className = 'letter');
+
+    const len = Math.min(text.length, currentWordStr.length);
+
+    for (let i = 0; i < len; i++) {
+        const charSpan = div.children[i];
+        if (text[i] === currentWordStr[i]) {
+            charSpan.classList.add('correct');
+        } else {
+            charSpan.classList.add('incorrect');
+        }
+    }
+
+    state.charIndex = text.length;
+}
+
 // Session History
 let sessionHistory = [];
 window.sessionHistory = sessionHistory;
 
 function generateInsights() {
     const lines = [];
+
+    // Helper to add insight
+    const addFn = (text, type) => lines.push({ text, type });
 
     // 1. Top Key Errors
     const topKeys = Object.entries(mistakeHistory.characters)
@@ -550,7 +713,7 @@ function generateInsights() {
         .map(e => e[0]);
 
     if (topKeys.length > 0) {
-        lines.push(`Most errors on: ${topKeys.join(', ')}`);
+        addFn(`Most errors on: ${topKeys.join(', ')}`, 'accuracy');
     }
 
     // 2. Weak Words
@@ -560,7 +723,7 @@ function generateInsights() {
         .map(e => e[0]);
 
     if (weakWords.length > 0) {
-        lines.push(`Weak words: ${weakWords.join(', ')}`);
+        addFn(`Weak words: ${weakWords.join(', ')}`, 'accuracy');
     }
 
     // 3. Hand & Finger Analysis
@@ -600,9 +763,9 @@ function generateInsights() {
         if (diff > 0.05) { // 5% difference threshold
             const diffPct = Math.round(diff * 100);
             if (leftAcc < rightAcc) {
-                lines.push(`Left hand accuracy is ${diffPct}% lower than right hand.`);
+                addFn(`Left hand accuracy is ${diffPct}% lower than right hand.`, 'hand');
             } else {
-                lines.push(`Right hand accuracy is ${diffPct}% lower than left hand.`);
+                addFn(`Right hand accuracy is ${diffPct}% lower than left hand.`, 'hand');
             }
         }
     }
@@ -622,7 +785,7 @@ function generateInsights() {
     });
 
     if (weakestFinger && minAcc < 0.95) {
-        lines.push(`${weakestFinger} finger shows the highest error rate.`);
+        addFn(`${weakestFinger} finger shows the highest error rate.`, 'finger');
     }
 
     // 4. Fatigue Analysis (Time Segments)
@@ -643,7 +806,7 @@ function generateInsights() {
         const acc2 = calcAcc(secondHalf);
 
         if ((acc1 - acc2) > 0.05) { // 5% drop
-            lines.push("Accuracy drops significantly in the second half.");
+            addFn("Accuracy drops significantly in the second half.", 'fatigue');
         }
 
         // 40s Threshold
@@ -655,7 +818,7 @@ function generateInsights() {
             const accLate = calcAcc(latePart);
 
             if ((accEarly - accLate) > 0.05) {
-                lines.push("Accuracy drops after 40 seconds — consider shorter practice sessions.");
+                addFn("Accuracy drops after 40 seconds — consider shorter practice sessions.", 'fatigue');
             }
         }
     }
@@ -670,14 +833,18 @@ function generateInsights() {
             const diff = currentParams.accuracy - avgAcc;
 
             if (diff >= 5) {
-                lines.push("Accuracy is significantly up!");
+                addFn("Accuracy is significantly up!", 'trend');
             } else if (diff <= -5) {
-                lines.push("Accuracy dropped compared to recent average.");
+                addFn("Accuracy dropped compared to recent average.", 'trend');
             }
         }
     }
 
-    return lines.join('<br>');
+    return lines;
+}
+
+function getInsightHtml(lines) {
+    return lines.map(l => l.text).join('<br>');
 }
 
 window.endGame = endGame;
@@ -709,7 +876,8 @@ function endGame() {
         sessionHistory.shift();
     }
 
-    const insightsHtml = generateInsights();
+    const insightsData = generateInsights();
+    const insightsHtml = getInsightHtml(insightsData);
     document.getElementById('insights').innerHTML = insightsHtml;
 
     // Populate Result Overlay Stats
@@ -735,7 +903,7 @@ function endGame() {
         geminiBtn.className = 'restart-btn'; // Re-use style
         geminiBtn.style.marginTop = '10px';
         geminiBtn.style.backgroundColor = '#8e44ad'; // Distinct color
-        geminiBtn.innerText = 'Analyze with Gemini';
+        geminiBtn.innerText = 'Analyze Performance';
         geminiBtn.onclick = triggerGeminiAnalysis;
 
         // Append after restart button
@@ -763,29 +931,159 @@ async function triggerGeminiAnalysis() {
 
     btn.disabled = true;
     btn.innerText = 'Analyzing...';
-    analysisBox.innerHTML = 'Sending data to Gemini...';
+    analysisBox.innerHTML = 'Generating insights...';
 
     try {
         const summary = getTypingSessionSummary();
         const analysis = await analyzeTypingPerformance(summary);
 
         // Render Analysis
-        let html = `<h3>Gemini Coach Insights</h3>`;
-        html += `<ul>`;
-        analysis.insights.forEach(insight => html += `<li>${insight}</li>`);
+        let html = `<h3 style="margin-top: 15px; margin-bottom: 10px; color: #f1c40f;">Session Insights</h3>`;
+
+        // Insights List (Max 3)
+        html += `<ul style="padding-left: 20px; margin-bottom: 20px;">`;
+        const insightsToShow = analysis.insights ? analysis.insights.slice(0, 3) : [];
+
+        insightsToShow.forEach(item => {
+            let tagsHtml = '';
+            if (item.tags && Array.isArray(item.tags)) {
+                item.tags.forEach(tag => {
+                    let colorClass = 'tag-default';
+                    const lowerTag = tag.toLowerCase();
+                    if (lowerTag.includes('speed')) colorClass = 'tag-speed';
+                    else if (lowerTag.includes('accuracy')) colorClass = 'tag-accuracy';
+                    else if (lowerTag.includes('fatigue')) colorClass = 'tag-fatigue';
+                    else if (lowerTag.includes('habit')) colorClass = 'tag-habit';
+                    else if (lowerTag.includes('bangla') || lowerTag.includes('english')) colorClass = 'tag-lang';
+
+                    tagsHtml += `<span class="insight-tag ${colorClass}">${tag}</span>`;
+                });
+            }
+            html += `<li style="margin-bottom: 8px;">${item.text} ${tagsHtml}</li>`;
+        });
         html += `</ul>`;
-        html += `<p><strong>Root Cause:</strong> ${analysis.rootCause}</p>`;
-        html += `<p><strong>Suggestion:</strong> ${analysis.suggestion}</p>`;
+
+        // Recommendation Section
+        if (analysis.recommendation) {
+            html += `<div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; border-left: 4px solid #f1c40f;">`;
+            html += `<h4 style="margin-bottom: 10px; color: #fff;">Coach Recommendation</h4>`;
+            html += `<p><strong>Focus:</strong> ${analysis.recommendation.focusArea}</p>`;
+            html += `<p><strong>Duration:</strong> ${analysis.recommendation.practiceDuration}</p>`;
+            html += `<p style="margin-bottom: 10px;"><strong>Mode:</strong> ${analysis.recommendation.mode.type.toUpperCase()} (${analysis.recommendation.mode.value})</p>`;
+
+            html += `<button id="apply-rec-btn" style="
+                background: transparent; 
+                border: 1px solid #f1c40f; 
+                color: #f1c40f; 
+                padding: 6px 12px; 
+                cursor: pointer; 
+                border-radius: 4px; 
+                font-size: 0.8rem;
+                margin-top: 5px;">
+                Apply Settings
+            </button>`;
+            html += `</div>`;
+        } else {
+            // Fallback if recommendation missing (legacy response support)
+            html += `<div style="margin-top: 15px;"><p><strong>Suggestion:</strong> ${analysis.suggestion}</p></div>`;
+        }
 
         analysisBox.innerHTML = html;
         btn.innerText = 'Analyze Again';
+
+        // Bind Apply Button
+        const applyBtn = document.getElementById('apply-rec-btn');
+        if (applyBtn && analysis.recommendation) {
+            applyBtn.onclick = () => {
+                applyRecommendation(analysis.recommendation.mode);
+                applyBtn.innerText = 'Applied!';
+                applyBtn.disabled = true;
+            };
+        }
+
     } catch (error) {
         console.error(error);
-        analysisBox.innerHTML = `<p style="color: #e74c3c;">Error: ${error.message}</p>`;
-        btn.innerText = 'Retry Analysis';
+
+        // --- FALLBACK LOGIC ---
+        console.log("Gemini unavailable, using fallback logic.");
+
+        const localInsights = generateInsights(); // Array of {text, type}
+
+        // Render Fallback
+        let html = `<h3 style="margin-top: 15px; margin-bottom: 10px; color: #95a5a6;">Basic Analysis</h3>`;
+        html += `<ul style="padding-left: 20px; margin-bottom: 20px;">`;
+
+        if (localInsights.length > 0) {
+            localInsights.slice(0, 3).forEach(item => {
+                // Map local types to css classes
+                let colorClass = 'tag-default';
+                if (item.type === 'accuracy') colorClass = 'tag-accuracy';
+                else if (item.type === 'fatigue') colorClass = 'tag-fatigue';
+                else if (item.type === 'hand' || item.type === 'finger') colorClass = 'tag-habit';
+                else if (item.type === 'trend') colorClass = 'tag-speed';
+
+                html += `<li style="margin-bottom: 8px;">${item.text} <span class="insight-tag ${colorClass}">${item.type.toUpperCase()}</span></li>`;
+            });
+        } else {
+            html += `<li>No significant patterns detected yet. Keep practicing!</li>`;
+        }
+        html += `</ul>`;
+
+        html += `<div style="margin-top: 20px; padding: 10px; border-top: 1px solid #444; font-size: 0.8rem; color: #7f8c8d;">
+            <em>Advanced coaching is currently unavailable. Showing rule-based insights.</em>
+        </div>`;
+
+        analysisBox.innerHTML = html;
+        btn.innerText = 'Analyze Again'; // Reset button state so user can retry
+
+        // Do not display error in analysis box, handled gracefully above.
     } finally {
         btn.disabled = false;
     }
+}
+
+function applyRecommendation(modeConfig) {
+    if (!modeConfig) return;
+
+    // Update Config
+    const type = modeConfig.type.toLowerCase();
+
+    // Map 'weak' to correct value if needed, though existing parser handles string
+    // Update Select Dropdown
+    let selectVal = '';
+    if (type === 'time') {
+        selectVal = `time-${modeConfig.value}`;
+    } else if (type === 'words') {
+        selectVal = `words-${modeConfig.value}`;
+    } else if (type === 'weak') {
+        selectVal = 'weak-words';
+    }
+
+    if (selectVal) {
+        // Check if option exists, otherwise fall back or create?
+        // Existing options: time-15, time-30, time-60, words-10, words-25, words-50, weak-words
+        // Use closest match or just set CONFIG directly and update UI visually if strictly needed.
+        // For now, let's set CONFIG directly and try to match dropdown.
+
+        modeSelect.value = selectVal;
+
+        // If exact value not in dropdown, we might need manual override logic.
+        // But let's assume valid standard values for now or just set internal config.
+        // Actually, parseMode() reads from dropdown. Improving this structure would require refactoring parseMode.
+        // Let's just set the dropdown if it exists.
+
+        const option = Array.from(modeSelect.options).find(opt => opt.value === selectVal);
+        if (option) {
+            modeSelect.value = selectVal;
+        } else {
+            // If custom value, we might need to manually set Config and trick UI
+            // But let's stick to standard options in prompt instructions if possible.
+        }
+    }
+
+    // Trigger Mode Change
+    const event = new Event('change');
+    modeSelect.dispatchEvent(event);
 }
 
 async function analyzeTypingPerformance(data) {
@@ -800,15 +1098,27 @@ async function analyzeTypingPerformance(data) {
     ${JSON.stringify(data)}
 
     Return a JSON response with:
-    - 3-5 short coaching insights (insights)
-    - Root causes of mistakes (not just symptoms) (rootCause)
-    - One clear improvement suggestion (suggestion)
-
+    - insights: Array of objects (MAX 3 ITEMS), each having:
+        - text: string (MAX 120 CHARACTERS. Calm, coaching tone. No "Gemini", "AI", "Bot" words.)
+        - tags: array of strings (Categories: Speed, Accuracy, Fatigue, Habit, Language)
+    - recommendation: object containing:
+        - practiceDuration: string (e.g. "15 minutes")
+        - mode: object { type: "time" | "words" | "weak", value: number } (Choose standard values if possible: time: 15/30/60, words: 10/25/50)
+        - focusArea: string
+    - rootCause: string
+    
     Rules:
-    - No motivational fluff.
-    - No technical jargon.
-    - Concise and user-friendly.
+    - STRICTLY max 3 insights.
+    - Insight text must be < 120 chars.
+    - Tone: Helpful coach, not robotic.
+    - NEVER mention "AI", "Gemini", or "analyzing".
     - STRICT JSON output.
+    
+    Scope Control:
+    - Analyze ONLY the provided data. Do not hallucinate or assume external context.
+    - Do NOT suggest new UI features, code changes, or website improvements.
+    - Do NOT ask for more data.
+    - Stateless analysis: Do not refer to previous conversations or store user data.
     `;
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
@@ -837,39 +1147,73 @@ async function analyzeTypingPerformance(data) {
 }
 
 
-// Event Listeners
-hiddenInput.addEventListener('keydown', handleInput);
-
-document.addEventListener('click', (e) => {
-    if (e.target === modeSelect) return;
-    if (resultOverlay.classList.contains('hidden')) {
-        hiddenInput.focus();
-    }
-});
-
-modeSelect.addEventListener('change', () => {
-    resetTest();
-    hiddenInput.focus();
-});
-
-restartBtn.addEventListener('click', resetTest);
-window.addEventListener('resize', updateCaretPosition);
-
+// Event Listeners are now properly initialized inside init() function
 
 
 // Init
 function init() {
+    console.log("Initializing Keyboard Joddha...");
+
+    // 1. Initialize DOM Elements
+    wordsDiv = document.getElementById('words');
+    timerEl = document.getElementById('timer');
+    modeSelect = document.getElementById('mode-select');
+    hiddenInput = document.getElementById('hidden-input');
+    caret = document.getElementById('caret');
+    suggestionBox = document.getElementById('suggestion-box'); // NEW
+    resultOverlay = document.getElementById('result-overlay');
+    restartBtn = document.getElementById('restart-btn');
+    wpmEl = document.getElementById('wpm');
+    accEl = document.getElementById('acc');
+    errorsEl = document.getElementById('errors');
     langEnBtn = document.getElementById('lang-en');
     langBnBtn = document.getElementById('lang-bn');
+
+    // 2. Initialize Bangla Engine safely
+    if (window.BanglaPhoneticEngine) {
+        banglaEngine = new window.BanglaPhoneticEngine();
+        window.banglaEngine = banglaEngine;
+        console.log("Bangla Engine Loaded.");
+    } else {
+        console.warn("BanglaPhoneticEngine not found. Using Fallback.");
+        // Fallback Engine to prevent crash
+        banglaEngine = {
+            convert: (text) => text // Pass-through
+        };
+    }
 
     renderKeyboard();
 
     // Bind listeners
+    if (hiddenInput) {
+        hiddenInput.addEventListener('keydown', handleInput);
+        document.addEventListener('click', (e) => {
+            if (e.target === modeSelect) return;
+            if (resultOverlay && resultOverlay.classList.contains('hidden')) {
+                hiddenInput.focus();
+            }
+        });
+    }
+
+    // Config Listener
+    if (modeSelect) {
+        modeSelect.addEventListener('change', () => {
+            resetTest();
+            if (hiddenInput) hiddenInput.focus();
+        });
+    }
+
+    if (restartBtn) restartBtn.addEventListener('click', resetTest);
+    window.addEventListener('resize', updateCaretPosition);
+
     if (langEnBtn) langEnBtn.addEventListener('click', () => setLanguage('english'));
     if (langBnBtn) langBnBtn.addEventListener('click', () => setLanguage('bangla'));
 
     // Start Test
+    // Start Test
     resetTest();
+    console.log("Initialization Complete.");
+    document.body.style.border = "5px solid green"; // DEBUG: Init Success
 }
 
 // Data Summary for LLM Analysis
@@ -942,4 +1286,92 @@ function getTypingSessionSummary() {
 
 window.getTypingSessionSummary = getTypingSessionSummary;
 
-document.addEventListener('DOMContentLoaded', init);
+window.getTypingSessionSummary = getTypingSessionSummary;
+
+// --- Authentication Logic ---
+function initAuth() {
+    try {
+        // Firebase is loaded globally from firebase_config.js script tag
+        if (window.auth) {
+            auth = window.auth;
+            googleProvider = window.googleProvider;
+            signInWithPopup = window.signInWithPopup;
+            signOut = window.signOut;
+            onAuthStateChanged = window.onAuthStateChanged;
+        } else {
+            console.warn("Firebase not loaded. Running in offline/no-auth mode.");
+            return;
+        }
+
+        const loginBtn = document.getElementById('login-btn');
+        const logoutBtn = document.getElementById('logout-btn');
+        const authInfo = document.getElementById('auth-info');
+        const userAvatar = document.getElementById('user-avatar');
+        const userName = document.getElementById('user-name');
+
+        if (loginBtn) {
+            loginBtn.addEventListener('click', async () => {
+                if (!signInWithPopup) return;
+                try {
+                    await signInWithPopup(auth, googleProvider);
+                } catch (error) {
+                    console.error("Login Failed:", error);
+                    alert("Login failed. Please try again.");
+                }
+            });
+        }
+
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', async () => {
+                if (!signOut) return;
+                try {
+                    await signOut(auth);
+                } catch (error) {
+                    console.error("Logout Failed:", error);
+                }
+            });
+        }
+
+        // Auth State Monitor
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                if (loginBtn) loginBtn.style.display = 'none';
+                if (authInfo) {
+                    authInfo.classList.remove('hidden');
+                    authInfo.style.display = 'flex';
+                }
+                if (userAvatar) userAvatar.src = user.photoURL || 'https://via.placeholder.com/32';
+                if (userName) userName.innerText = user.displayName ? user.displayName.split(' ')[0] : 'User';
+            } else {
+                if (loginBtn) {
+                    loginBtn.classList.remove('hidden');
+                    loginBtn.style.display = 'flex';
+                }
+                if (authInfo) {
+                    authInfo.classList.add('hidden');
+                    authInfo.style.display = 'none';
+                }
+            }
+        });
+
+    } catch (e) {
+        console.warn("Firebase initialization failed.", e);
+        const loginBtn = document.getElementById('login-btn');
+        if (loginBtn) {
+            loginBtn.title = "Authentication unavailable";
+        }
+    }
+}
+
+// Init call
+// Init call (Wait for DOM)
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        init();
+        initAuth();
+    });
+} else {
+    init();
+    initAuth();
+}
+
