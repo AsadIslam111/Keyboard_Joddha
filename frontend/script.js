@@ -118,7 +118,7 @@ function updateKeyboardHeatmap() {
 // DOM Elements
 // DOM Elements (Initialized in init)
 // DOM Elements (Initialized in init)
-let wordsDiv, timerEl, modeSelect, hiddenInput, caret, resultOverlay, restartBtn, wpmEl, accEl, errorsEl, langEnBtn, langBnBtn, suggestionBox;
+let wordsDiv, timerEl, modeSelect, hiddenInput, caret, resultOverlay, restartBtn, wpmEl, accEl, errorsEl, langEnBtn, langBnBtn, suggestionBox, visualKeyboard;
 
 
 
@@ -254,6 +254,7 @@ function resetTest() {
     document.getElementById('insights').innerHTML = '';
 
     resultOverlay.classList.add('hidden');
+    if (visualKeyboard) visualKeyboard.classList.remove('hidden');
     hiddenInput.value = '';
     hiddenInput.focus();
     renderWords();
@@ -887,6 +888,9 @@ function endGame() {
 
     updateKeyboardHeatmap(); // Update visual keyboard
 
+    updateKeyboardHeatmap(); // Update visual keyboard
+
+    if (visualKeyboard) visualKeyboard.classList.add('hidden');
     resultOverlay.classList.remove('hidden');
     hiddenInput.blur();
 
@@ -1167,7 +1171,9 @@ function init() {
     accEl = document.getElementById('acc');
     errorsEl = document.getElementById('errors');
     langEnBtn = document.getElementById('lang-en');
+    langEnBtn = document.getElementById('lang-en');
     langBnBtn = document.getElementById('lang-bn');
+    visualKeyboard = document.getElementById('visual-keyboard');
 
     // 2. Initialize Bangla Engine safely
     if (window.BanglaPhoneticEngine) {

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
-        href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
         rel="stylesheet">
     <link href="style.css" rel="stylesheet">
     <link href="suggestion.css" rel="stylesheet">
@@ -55,6 +55,7 @@
         <!-- Toolbar -->
         <div class="toolbar">
             <select id="mode-select" class="mode-select">
+                <option value="time-5">Time 5 (Test)</option>
                 <option value="time-30">Time 30</option>
                 <option value="time-60">Time 60</option>
                 <option value="words-25">Words 25</option>
@@ -90,19 +91,7 @@
 
             </div>
 
-            <!-- Result Overlay -->
-            <div id="result-overlay" class="hidden">
-                <div class="result-box">
-                    <div class="result-title">Test Complete</div>
-                    <div class="result-stats">
-                        <div>WPM: <span id="result-wpm">0</span></div>
-                        <div>Acc: <span id="result-acc">100%</span></div>
-                        <div>Errors: <span id="result-errors">0</span></div>
-                    </div>
-                    <div id="insights"></div>
-                    <button id="restart-btn">Restart</button>
-                </div>
-            </div>
+
         </main>
 
         <!-- Visual Keyboard -->
@@ -114,6 +103,20 @@
                 <span>Tab: Restart</span> &nbsp;•&nbsp; <span>Esc: Mode</span>
             </div>
         </footer>
+    </div>
+
+    <!-- Result Overlay (Moved to root for fixed positioning) -->
+    <div id="result-overlay" class="hidden">
+        <div class="result-box">
+            <div class="result-title">Test Complete</div>
+            <div class="result-stats">
+                <div>WPM: <span id="result-wpm">0</span></div>
+                <div>Acc: <span id="result-acc">100%</span></div>
+                <div>Errors: <span id="result-errors">0</span></div>
+            </div>
+            <div id="insights"></div>
+            <button id="restart-btn">Restart</button>
+        </div>
     </div>
 
     <div id="suggestion-box" class="suggestion-box hidden"></div>
