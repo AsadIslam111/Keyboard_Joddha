@@ -12,7 +12,12 @@
         rel="stylesheet">
     <link href="style.css" rel="stylesheet">
     <link href="suggestion.css" rel="stylesheet">
-    <script src="firebase_config.js" defer></script>
+    <!-- Firebase SDK (compat version - works without local server) -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="firebase_config.js"></script>
     <script src="phonetic_engine.js" defer></script>
     <script src="script.js" defer></script>
 </head>
@@ -62,6 +67,17 @@
                 <option value="words-50">Words 50</option>
                 <option value="weak-words">Weak Words</option>
             </select>
+
+            <!-- Multiplayer Button -->
+            <button id="multiplayer-btn" class="multiplayer-btn">
+                <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M7 14s-1 0-1-1 1-4 5-4 5 3 5 4-1 1-1 1H7zm4-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+                    <path fill-rule="evenodd"
+                        d="M5.216 14A2.238 2.238 0 0 1 5 13c0-1.355.68-2.75 1.936-3.72A6.325 6.325 0 0 0 5 9c-4 0-5 3-5 4s1 1 1 1h4.216z" />
+                    <path d="M4.5 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z" />
+                </svg>
+                Multiplayer
+            </button>
 
             <!-- Language Toggle -->
             <div class="lang-toggle">
@@ -120,6 +136,83 @@
     </div>
 
     <div id="suggestion-box" class="suggestion-box hidden"></div>
+
+    <!-- Multiplayer Lobby Overlay -->
+    <div id="lobby-overlay" class="overlay hidden">
+        <div class="overlay-box lobby-box">
+            <div class="overlay-header">
+                <h2>Multiplayer Race</h2>
+                <button id="lobby-close" class="close-btn">&times;</button>
+            </div>
+
+            <!-- Tab Navigation -->
+            <div class="lobby-tabs">
+                <button id="tab-create" class="lobby-tab active">Create Room</button>
+                <button id="tab-join" class="lobby-tab">Join Room</button>
+            </div>
+
+            <!-- Create Room Panel -->
+            <div id="panel-create" class="lobby-panel">
+                <p>Create a new room and invite friends to race!</p>
+                <button id="create-room-btn" class="action-btn">Create Room</button>
+            </div>
+
+            <!-- Join Room Panel -->
+            <div id="panel-join" class="lobby-panel hidden">
+                <p>Enter the room code to join:</p>
+                <input type="text" id="room-code-input" class="room-input" placeholder="XXXXXX" maxlength="6"
+                    autocomplete="off">
+                <button id="join-room-btn" class="action-btn">Join Room</button>
+            </div>
+
+            <!-- Waiting Room (shown after creating/joining) -->
+            <div id="waiting-room" class="lobby-panel hidden">
+                <div class="room-code-display">
+                    <span>Room Code:</span>
+                    <strong id="display-room-code">------</strong>
+                    <button id="copy-code-btn" class="copy-btn" title="Copy Code">📋</button>
+                </div>
+                <div class="players-section">
+                    <h3>Players <span id="player-count">(0/10)</span></h3>
+                    <ul id="players-list" class="players-list"></ul>
+                </div>
+                <div class="room-actions">
+                    <button id="start-race-btn" class="action-btn host-only hidden">Start Race</button>
+                    <button id="leave-room-btn" class="leave-btn">Leave Room</button>
+                </div>
+            </div>
+
+            <!-- Countdown Overlay -->
+            <div id="countdown-display" class="countdown hidden">
+                <span id="countdown-number">3</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multiplayer Leaderboard Overlay -->
+    <div id="leaderboard-overlay" class="overlay hidden">
+        <div class="overlay-box leaderboard-box">
+            <h2>🏆 Race Results</h2>
+            <table id="leaderboard-table" class="leaderboard-table">
+                <thead>
+                    <tr>
+                        <th>Rank</th>
+                        <th>Player</th>
+                        <th>WPM</th>
+                        <th>Accuracy</th>
+                    </tr>
+                </thead>
+                <tbody id="leaderboard-body">
+                    <!-- Results will be injected here -->
+                </tbody>
+            </table>
+            <div class="leaderboard-actions">
+                <button id="play-again-btn" class="action-btn host-only hidden">Play Again</button>
+                <button id="back-to-lobby-btn" class="action-btn">Back to Lobby</button>
+                <button id="exit-multiplayer-btn" class="leave-btn">Exit Multiplayer</button>
+            </div>
+        </div>
+    </div>
 
 </body>
 

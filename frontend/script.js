@@ -166,7 +166,12 @@ function setLanguage(lang) {
     hiddenInput.focus();
 }
 
-function generateWords() {
+function generateWords(fixedList = null) {
+    // If a fixed list is provided (for multiplayer), use it directly
+    if (fixedList && Array.isArray(fixedList)) {
+        return [...fixedList];
+    }
+
     if (CONFIG.language === 'bangla') {
         const list = [];
         for (let i = 0; i < CONFIG.wordCount; i++) {
@@ -1195,6 +1200,16 @@ function init() {
         hiddenInput.addEventListener('keydown', handleInput);
         document.addEventListener('click', (e) => {
             if (e.target === modeSelect) return;
+
+            // Don't steal focus when multiplayer overlays are open
+            const lobbyOverlay = document.getElementById('lobby-overlay');
+            const leaderboardOverlay = document.getElementById('leaderboard-overlay');
+            if (lobbyOverlay && !lobbyOverlay.classList.contains('hidden')) return;
+            if (leaderboardOverlay && !leaderboardOverlay.classList.contains('hidden')) return;
+
+            // Don't steal focus from input elements
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
             if (resultOverlay && resultOverlay.classList.contains('hidden')) {
                 hiddenInput.focus();
             }
@@ -1296,18 +1311,22 @@ window.getTypingSessionSummary = getTypingSessionSummary;
 
 // --- Authentication Logic ---
 function initAuth() {
+    // Wait for Firebase module to load (it loads asynchronously as a module)
+    if (!window.auth) {
+        console.log("Waiting for Firebase to load...");
+        setTimeout(initAuth, 100); // Retry after 100ms
+        return;
+    }
+
     try {
         // Firebase is loaded globally from firebase_config.js script tag
-        if (window.auth) {
-            auth = window.auth;
-            googleProvider = window.googleProvider;
-            signInWithPopup = window.signInWithPopup;
-            signOut = window.signOut;
-            onAuthStateChanged = window.onAuthStateChanged;
-        } else {
-            console.warn("Firebase not loaded. Running in offline/no-auth mode.");
-            return;
-        }
+        auth = window.auth;
+        googleProvider = window.googleProvider;
+        signInWithPopup = window.signInWithPopup;
+        signOut = window.signOut;
+        onAuthStateChanged = window.onAuthStateChanged;
+
+        console.log("Firebase Auth loaded successfully.");
 
         const loginBtn = document.getElementById('login-btn');
         const logoutBtn = document.getElementById('logout-btn');
@@ -1317,12 +1336,16 @@ function initAuth() {
 
         if (loginBtn) {
             loginBtn.addEventListener('click', async () => {
-                if (!signInWithPopup) return;
+                console.log("Login button clicked");
+                if (!signInWithPopup) {
+                    console.error("signInWithPopup not available");
+                    return;
+                }
                 try {
                     await signInWithPopup(auth, googleProvider);
                 } catch (error) {
                     console.error("Login Failed:", error);
-                    alert("Login failed. Please try again.");
+                    alert("Login failed: " + error.message);
                 }
             });
         }
@@ -1341,6 +1364,7 @@ function initAuth() {
         // Auth State Monitor
         onAuthStateChanged(auth, (user) => {
             if (user) {
+                console.log("User signed in:", user.displayName);
                 if (loginBtn) loginBtn.style.display = 'none';
                 if (authInfo) {
                     authInfo.classList.remove('hidden');
@@ -1349,6 +1373,7 @@ function initAuth() {
                 if (userAvatar) userAvatar.src = user.photoURL || 'https://via.placeholder.com/32';
                 if (userName) userName.innerText = user.displayName ? user.displayName.split(' ')[0] : 'User';
             } else {
+                console.log("User signed out");
                 if (loginBtn) {
                     loginBtn.classList.remove('hidden');
                     loginBtn.style.display = 'flex';
@@ -1375,9 +1400,792 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         init();
         initAuth();
+        initMultiplayer();
     });
 } else {
     init();
     initAuth();
+    initMultiplayer();
 }
 
+// ==================== MULTIPLAYER SYSTEM ====================
+
+// Multiplayer State
+let multiplayerState = {
+    isActive: false,
+    roomId: null,
+    roomCode: null,
+    isHost: false,
+    playerId: null,
+    playerName: 'Guest',
+    playerAvatar: null,
+    players: {},
+    roomData: null,
+    unsubscribeRoom: null,
+    unsubscribePlayers: null,
+    raceStarted: false, // Guard to prevent multiple startMultiplayerGame calls
+    leaderboardShown: false // Guard to prevent multiple showLeaderboard calls
+};
+
+// Firebase is accessed via window.db and window.firestore (compat API)
+
+// Generate a 6-character room code
+function generateRoomCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Avoiding ambiguous characters
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+}
+
+// Generate words for a room (with seed for consistency)
+function generateRoomWords(count = 50) {
+    const list = [];
+    for (let i = 0; i < count; i++) {
+        list.push(wordsList[Math.floor(Math.random() * wordsList.length)]);
+    }
+    return list;
+}
+
+// Initialize Multiplayer System
+function initMultiplayer() {
+    console.log("Initializing Multiplayer System...");
+
+    // Try to load Firebase modules
+    loadFirebaseModules();
+
+    // Get DOM Elements
+    const multiplayerBtn = document.getElementById('multiplayer-btn');
+    const lobbyOverlay = document.getElementById('lobby-overlay');
+    const lobbyClose = document.getElementById('lobby-close');
+    const tabCreate = document.getElementById('tab-create');
+    const tabJoin = document.getElementById('tab-join');
+    const panelCreate = document.getElementById('panel-create');
+    const panelJoin = document.getElementById('panel-join');
+    const waitingRoom = document.getElementById('waiting-room');
+    const createRoomBtn = document.getElementById('create-room-btn');
+    const joinRoomBtn = document.getElementById('join-room-btn');
+    const roomCodeInput = document.getElementById('room-code-input');
+    const copyCodeBtn = document.getElementById('copy-code-btn');
+    const startRaceBtn = document.getElementById('start-race-btn');
+    const leaveRoomBtn = document.getElementById('leave-room-btn');
+    const leaderboardOverlay = document.getElementById('leaderboard-overlay');
+    const playAgainBtn = document.getElementById('play-again-btn');
+    const backToLobbyBtn = document.getElementById('back-to-lobby-btn');
+    const exitMultiplayerBtn = document.getElementById('exit-multiplayer-btn');
+
+    // Open Lobby
+    if (multiplayerBtn) {
+        multiplayerBtn.addEventListener('click', () => {
+            if (!window.auth?.currentUser) {
+                alert('Please sign in to play multiplayer!');
+                return;
+            }
+            updatePlayerInfo();
+            showLobby();
+        });
+    }
+
+    // Close Lobby
+    if (lobbyClose) {
+        lobbyClose.addEventListener('click', () => {
+            if (multiplayerState.roomId) {
+                if (confirm('Leave the room?')) {
+                    leaveRoom();
+                    hideLobby();
+                }
+            } else {
+                hideLobby();
+            }
+        });
+    }
+
+    // Tab Switching
+    if (tabCreate) {
+        tabCreate.addEventListener('click', () => {
+            tabCreate.classList.add('active');
+            tabJoin.classList.remove('active');
+            panelCreate.classList.remove('hidden');
+            panelJoin.classList.add('hidden');
+        });
+    }
+
+    if (tabJoin) {
+        tabJoin.addEventListener('click', () => {
+            tabJoin.classList.add('active');
+            tabCreate.classList.remove('active');
+            panelJoin.classList.remove('hidden');
+            panelCreate.classList.add('hidden');
+        });
+    }
+
+    // Create Room
+    if (createRoomBtn) {
+        createRoomBtn.addEventListener('click', createRoom);
+    }
+
+    // Join Room
+    if (joinRoomBtn) {
+        joinRoomBtn.addEventListener('click', () => {
+            const code = roomCodeInput.value.trim().toUpperCase();
+            if (code.length !== 6) {
+                alert('Please enter a valid 6-character room code');
+                return;
+            }
+            joinRoom(code);
+        });
+    }
+
+    // Copy Room Code
+    if (copyCodeBtn) {
+        copyCodeBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(multiplayerState.roomCode);
+            copyCodeBtn.textContent = '✓';
+            setTimeout(() => copyCodeBtn.textContent = '📋', 1500);
+        });
+    }
+
+    // Start Race (Host Only)
+    if (startRaceBtn) {
+        startRaceBtn.addEventListener('click', startMultiplayerRace);
+    }
+
+    // Leave Room
+    if (leaveRoomBtn) {
+        leaveRoomBtn.addEventListener('click', () => {
+            leaveRoom();
+            showCreateJoinPanels();
+        });
+    }
+
+    // Leaderboard Actions
+    if (playAgainBtn) {
+        playAgainBtn.addEventListener('click', () => {
+            if (multiplayerState.isHost) {
+                resetRoomForNewRace();
+            }
+        });
+    }
+
+    if (backToLobbyBtn) {
+        backToLobbyBtn.addEventListener('click', () => {
+            leaderboardOverlay.classList.add('hidden');
+            showLobby();
+            showWaitingRoom();
+        });
+    }
+
+    if (exitMultiplayerBtn) {
+        exitMultiplayerBtn.addEventListener('click', () => {
+            leaveRoom();
+            leaderboardOverlay.classList.add('hidden');
+        });
+    }
+
+    // Auto-uppercase room code input
+    if (roomCodeInput) {
+        roomCodeInput.addEventListener('input', (e) => {
+            e.target.value = e.target.value.toUpperCase();
+        });
+    }
+
+    console.log("Multiplayer System Initialized.");
+}
+
+// Load Firebase modules from global exports
+function loadFirebaseModules() {
+    // These are exported from firebase_config.js
+    if (window.db) {
+        dbRef = window.ref;
+        dbSet = window.set;
+        dbGet = window.get;
+        dbPush = window.push;
+        dbOnValue = window.onValue;
+        dbUpdate = window.update;
+        dbRemove = window.remove;
+        dbChild = window.child;
+        dbServerTimestamp = window.serverTimestamp;
+    }
+    if (window.firestore) {
+        fsFirestore = window.firestore;
+        fsCollection = window.collection;
+        fsDoc = window.doc;
+        fsSetDoc = window.setDoc;
+        fsGetDoc = window.getDoc;
+        fsAddDoc = window.addDoc;
+    }
+}
+
+// Update player info from auth
+function updatePlayerInfo() {
+    const user = window.auth?.currentUser;
+    if (user) {
+        multiplayerState.playerId = user.uid;
+        multiplayerState.playerName = user.displayName || 'Player';
+        multiplayerState.playerAvatar = user.photoURL || 'https://via.placeholder.com/32';
+    } else {
+        multiplayerState.playerId = 'guest_' + Math.random().toString(36).substr(2, 9);
+        multiplayerState.playerName = 'Guest';
+        multiplayerState.playerAvatar = 'https://via.placeholder.com/32';
+    }
+}
+
+// Show/Hide Lobby
+function showLobby() {
+    document.getElementById('lobby-overlay').classList.remove('hidden');
+}
+
+function hideLobby() {
+    document.getElementById('lobby-overlay').classList.add('hidden');
+}
+
+function showCreateJoinPanels() {
+    document.getElementById('panel-create').classList.remove('hidden');
+    document.getElementById('panel-join').classList.add('hidden');
+    document.getElementById('waiting-room').classList.add('hidden');
+    document.getElementById('tab-create').classList.add('active');
+    document.getElementById('tab-join').classList.remove('active');
+    document.querySelector('.lobby-tabs').style.display = 'flex';
+}
+
+function showWaitingRoom() {
+    document.getElementById('panel-create').classList.add('hidden');
+    document.getElementById('panel-join').classList.add('hidden');
+    document.getElementById('waiting-room').classList.remove('hidden');
+    document.querySelector('.lobby-tabs').style.display = 'none';
+}
+
+// Create Room
+async function createRoom() {
+    if (!window.db) {
+        alert('Firebase not available. Please refresh and try again.');
+        return;
+    }
+
+    const roomCode = generateRoomCode();
+    const roomId = roomCode.toLowerCase();
+    const words = generateRoomWords(50);
+
+    const roomData = {
+        code: roomCode,
+        hostId: multiplayerState.playerId,
+        hostName: multiplayerState.playerName,
+        state: 'waiting', // waiting, countdown, playing, finished
+        words: words,
+        createdAt: Date.now(),
+        startTime: null,
+        settings: {
+            mode: 'time',
+            duration: 30,
+            wordCount: 50
+        }
+    };
+
+    try {
+        // Using compat API: db.ref(path).set(data)
+        await window.db.ref(`rooms/${roomId}`).set(roomData);
+
+        // Add self as player
+        await window.db.ref(`rooms/${roomId}/players/${multiplayerState.playerId}`).set({
+            name: multiplayerState.playerName,
+            avatar: multiplayerState.playerAvatar,
+            isHost: true,
+            joinedAt: Date.now(),
+            progress: 0,
+            wpm: 0,
+            accuracy: 100,
+            finished: false,
+            finishTime: null
+        });
+
+        multiplayerState.roomId = roomId;
+        multiplayerState.roomCode = roomCode;
+        multiplayerState.isHost = true;
+        multiplayerState.isActive = true;
+
+        document.getElementById('display-room-code').textContent = roomCode;
+        document.getElementById('start-race-btn').classList.remove('hidden');
+
+        showWaitingRoom();
+        subscribeToRoom(roomId);
+
+        console.log("Room created:", roomCode);
+    } catch (error) {
+        console.error("Failed to create room:", error);
+        alert('Failed to create room: ' + error.message);
+    }
+}
+
+// Join Room
+async function joinRoom(code) {
+    if (!window.db) {
+        alert('Firebase not available. Please refresh and try again.');
+        return;
+    }
+
+    const roomId = code.toLowerCase();
+
+    try {
+        // Using compat API
+        const snapshot = await window.db.ref(`rooms/${roomId}`).get();
+
+        if (!snapshot.exists()) {
+            alert('Room not found. Please check the code and try again.');
+            return;
+        }
+
+        const roomData = snapshot.val();
+
+        if (roomData.state !== 'waiting') {
+            alert('This room has already started. Please try another room.');
+            return;
+        }
+
+        // Count players
+        const playersSnapshot = await window.db.ref(`rooms/${roomId}/players`).get();
+        const playerCount = playersSnapshot.exists() ? Object.keys(playersSnapshot.val()).length : 0;
+
+        if (playerCount >= 10) {
+            alert('This room is full (max 10 players).');
+            return;
+        }
+
+        // Add self as player
+        await window.db.ref(`rooms/${roomId}/players/${multiplayerState.playerId}`).set({
+            name: multiplayerState.playerName,
+            avatar: multiplayerState.playerAvatar,
+            isHost: false,
+            joinedAt: Date.now(),
+            progress: 0,
+            wpm: 0,
+            accuracy: 100,
+            finished: false,
+            finishTime: null
+        });
+
+        multiplayerState.roomId = roomId;
+        multiplayerState.roomCode = code.toUpperCase();
+        multiplayerState.isHost = false;
+        multiplayerState.isActive = true;
+
+        document.getElementById('display-room-code').textContent = code.toUpperCase();
+        document.getElementById('start-race-btn').classList.add('hidden');
+
+        showWaitingRoom();
+        subscribeToRoom(roomId);
+
+        console.log("Joined room:", code);
+    } catch (error) {
+        console.error("Failed to join room:", error);
+        alert('Failed to join room: ' + error.message);
+    }
+}
+
+// Leave Room
+async function leaveRoom() {
+    if (!multiplayerState.roomId) return;
+
+    try {
+        // Remove self from players using compat API
+        await window.db.ref(`rooms/${multiplayerState.roomId}/players/${multiplayerState.playerId}`).remove();
+
+        // If host, delete the room
+        if (multiplayerState.isHost) {
+            await window.db.ref(`rooms/${multiplayerState.roomId}`).remove();
+        }
+    } catch (error) {
+        console.error("Error leaving room:", error);
+    }
+
+    // Unsubscribe from listeners
+    if (multiplayerState.unsubscribeRoom) {
+        multiplayerState.unsubscribeRoom();
+    }
+
+    // Reset state
+    multiplayerState.roomId = null;
+    multiplayerState.roomCode = null;
+    multiplayerState.isHost = false;
+    multiplayerState.isActive = false;
+    multiplayerState.players = {};
+    multiplayerState.roomData = null;
+
+    console.log("Left room");
+}
+
+// Subscribe to Room Updates - using compat API
+function subscribeToRoom(roomId) {
+    // Subscribe to room data using compat API: db.ref(path).on('value', callback)
+    const roomRef = window.db.ref(`rooms/${roomId}`);
+    let lastState = null; // Track last state to prevent duplicate actions
+
+    roomRef.on('value', (snapshot) => {
+        if (!snapshot.exists()) {
+            // Room was deleted
+            alert('The room has been closed.');
+            leaveRoom();
+            hideLobby();
+            return;
+        }
+
+        const data = snapshot.val();
+        multiplayerState.roomData = data;
+
+        // Only trigger state changes if state actually changed
+        if (data.state !== lastState) {
+            console.log('Room state changed:', lastState, '->', data.state);
+            lastState = data.state;
+
+            // Handle state changes
+            if (data.state === 'countdown') {
+                const countdownEl = document.getElementById('countdown-display');
+                if (!countdownEl.classList.contains('visible')) {
+                    startCountdown(data.countdownEnd);
+                }
+            } else if (data.state === 'playing') {
+                if (!state.isTyping && !multiplayerState.raceStarted) {
+                    multiplayerState.raceStarted = true;
+                    startMultiplayerGame(data.words);
+                }
+            } else if (data.state === 'finished') {
+                // Don't call showLeaderboard here - let finishMultiplayerRace handle it
+                // This prevents duplicate calls
+            } else if (data.state === 'waiting') {
+                // Reset race flag when back to waiting
+                multiplayerState.raceStarted = false;
+            }
+        }
+
+        // Update players list
+        if (data.players) {
+            multiplayerState.players = data.players;
+            renderPlayersList(data.players, data.hostId);
+        }
+    });
+
+    // Store unsubscribe function
+    multiplayerState.unsubscribeRoom = () => roomRef.off('value');
+}
+
+// Render Players List
+function renderPlayersList(players, hostId) {
+    const playersList = document.getElementById('players-list');
+    const playerCount = document.getElementById('player-count');
+
+    if (!playersList) return;
+
+    const playerArray = Object.entries(players);
+    playerCount.textContent = `(${playerArray.length}/10)`;
+
+    playersList.innerHTML = playerArray.map(([id, player]) => `
+        <li>
+            <img src="${player.avatar || 'https://via.placeholder.com/32'}" alt="${player.name}" class="player-avatar">
+            <span class="player-name">${player.name}${id === multiplayerState.playerId ? ' (You)' : ''}</span>
+            ${player.isHost ? '<span class="host-badge">Host</span>' : ''}
+            ${player.finished ? '<span class="ready-status">✓ Finished</span>' : ''}
+        </li>
+    `).join('');
+}
+
+// Start Multiplayer Race (Host Only)
+async function startMultiplayerRace() {
+    if (!multiplayerState.isHost || !multiplayerState.roomId) return;
+
+    const countdownEnd = Date.now() + 4000; // 3 second countdown
+
+    try {
+        // Using compat API
+        await window.db.ref(`rooms/${multiplayerState.roomId}`).update({
+            state: 'countdown',
+            countdownEnd: countdownEnd
+        });
+    } catch (error) {
+        console.error("Failed to start race:", error);
+        alert('Failed to start race: ' + error.message);
+    }
+}
+
+// Start Countdown
+function startCountdown(endTime) {
+    const countdownDisplay = document.getElementById('countdown-display');
+    const countdownNumber = document.getElementById('countdown-number');
+
+    countdownDisplay.classList.remove('hidden');
+    countdownDisplay.classList.add('visible');
+
+    const updateCountdown = () => {
+        const remaining = Math.ceil((endTime - Date.now()) / 1000);
+
+        if (remaining > 0) {
+            countdownNumber.textContent = remaining;
+            setTimeout(updateCountdown, 100);
+        } else {
+            countdownNumber.textContent = 'GO!';
+            setTimeout(() => {
+                countdownDisplay.classList.add('hidden');
+                countdownDisplay.classList.remove('visible');
+
+                // Host updates state to playing - using compat API
+                if (multiplayerState.isHost) {
+                    window.db.ref(`rooms/${multiplayerState.roomId}`).update({
+                        state: 'playing',
+                        startTime: Date.now()
+                    });
+                }
+            }, 500);
+        }
+    };
+
+    updateCountdown();
+}
+
+// Start Multiplayer Game
+function startMultiplayerGame(words) {
+    // Hide lobby
+    hideLobby();
+
+    // Configure for multiplayer
+    CONFIG.mode = 'time';
+    CONFIG.value = 30;
+    CONFIG.wordCount = words.length;
+
+    // Reset with room words
+    clearInterval(state.timer);
+    state = {
+        words: [...words],
+        wordIndex: 0,
+        charIndex: 0,
+        startTime: Date.now(),
+        timeElapsed: 0,
+        timeRemaining: 30,
+        timer: null,
+        isTyping: true,
+        correctChars: 0,
+        incorrectChars: 0,
+        totalCharsTyped: 0,
+        keystrokeLog: [],
+        phoneticBuffer: '',
+        convertedBuffer: ''
+    };
+
+    timerEl.innerText = state.timeRemaining;
+    wpmEl.innerText = '0';
+    accEl.innerText = '100%';
+    errorsEl.innerText = '0';
+    resultOverlay.classList.add('hidden');
+
+    renderWords();
+    updateCaretPosition();
+    hiddenInput.value = '';
+    hiddenInput.focus();
+
+    // Start timer
+    state.timer = setInterval(() => {
+        state.timeRemaining--;
+        timerEl.innerText = state.timeRemaining;
+        updateStats();
+
+        // Update progress in room
+        updatePlayerProgress();
+
+        if (state.timeRemaining <= 0) {
+            finishMultiplayerRace();
+        }
+    }, 1000);
+}
+
+// Update Player Progress in Room
+async function updatePlayerProgress() {
+    if (!multiplayerState.roomId || !multiplayerState.isActive) return;
+
+    const progress = Math.round((state.wordIndex / state.words.length) * 100);
+    const wpm = calculateWPM();
+    const accuracy = calculateAccuracy();
+
+    try {
+        // Using compat API
+        await window.db.ref(`rooms/${multiplayerState.roomId}/players/${multiplayerState.playerId}`).update({
+            progress: progress,
+            wpm: wpm,
+            accuracy: accuracy
+        });
+    } catch (error) {
+        console.error("Failed to update progress:", error);
+    }
+}
+
+// Finish Multiplayer Race
+async function finishMultiplayerRace() {
+    clearInterval(state.timer);
+    state.isTyping = false;
+
+    const wpm = calculateWPM();
+    const accuracy = calculateAccuracy();
+
+    try {
+        // Using compat API
+        await window.db.ref(`rooms/${multiplayerState.roomId}/players/${multiplayerState.playerId}`).update({
+            finished: true,
+            finishTime: Date.now(),
+            wpm: wpm,
+            accuracy: accuracy,
+            progress: 100
+        });
+
+        // Check if all players finished
+        const snapshot = await window.db.ref(`rooms/${multiplayerState.roomId}/players`).get();
+        if (snapshot.exists()) {
+            const players = snapshot.val();
+            const allFinished = Object.values(players).every(p => p.finished);
+
+            if (allFinished && multiplayerState.isHost) {
+                await window.db.ref(`rooms/${multiplayerState.roomId}`).update({
+                    state: 'finished'
+                });
+            }
+        }
+
+        // Save to Firestore history
+        saveMatchHistory(wpm, accuracy);
+
+    } catch (error) {
+        console.error("Failed to finish race:", error);
+    }
+
+    // Show leaderboard after delay to allow Firebase sync
+    setTimeout(() => {
+        showLeaderboard();
+    }, 2000); // 2 second delay to ensure all players' data is synced
+}
+
+// Save Match History to Firestore - using compat API
+async function saveMatchHistory(wpm, accuracy) {
+    if (!window.firestore || !multiplayerState.playerId) return;
+
+    try {
+        // Using compat API: firestore.collection(path).add(data)
+        await window.firestore.collection('matchHistory').add({
+            odId: window.auth?.currentUser?.uid || multiplayerState.playerId,
+            odName: multiplayerState.playerName,
+            roomCode: multiplayerState.roomCode,
+            wpm: wpm,
+            accuracy: accuracy,
+            timestamp: Date.now(),
+            playerCount: Object.keys(multiplayerState.players).length
+        });
+        console.log("Match history saved");
+    } catch (error) {
+        console.error("Failed to save match history:", error);
+    }
+}
+
+// Show Leaderboard - fetches fresh data from Firebase to ensure sync
+async function showLeaderboard() {
+    // Guard: prevent multiple calls
+    if (multiplayerState.leaderboardShown) {
+        console.log("Leaderboard already shown, skipping");
+        return;
+    }
+    multiplayerState.leaderboardShown = true;
+
+    const leaderboardOverlay = document.getElementById('leaderboard-overlay');
+    const leaderboardBody = document.getElementById('leaderboard-body');
+    const playAgainBtn = document.getElementById('play-again-btn');
+
+    if (!leaderboardBody) return;
+
+    // Fetch fresh player data from Firebase to ensure sync
+    let playersData = multiplayerState.players;
+    try {
+        const snapshot = await window.db.ref(`rooms/${multiplayerState.roomId}/players`).get();
+        if (snapshot.exists()) {
+            playersData = snapshot.val();
+            multiplayerState.players = playersData; // Update local state
+            console.log("Leaderboard: Fetched fresh player data", playersData);
+        }
+    } catch (error) {
+        console.error("Failed to fetch fresh leaderboard data:", error);
+    }
+
+    // Sort players by WPM
+    const sortedPlayers = Object.entries(playersData)
+        .sort((a, b) => b[1].wpm - a[1].wpm);
+
+    leaderboardBody.innerHTML = sortedPlayers.map(([id, player], index) => {
+        const rankEmoji = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : (index + 1);
+        const isYou = id === multiplayerState.playerId;
+
+        return `
+            <tr>
+                <td class="rank-cell">${rankEmoji}</td>
+                <td class="player-cell">
+                    <img src="${player.avatar || 'https://via.placeholder.com/28'}" alt="${player.name}">
+                    ${player.name}
+                    ${isYou ? '<span class="you-badge">YOU</span>' : ''}
+                </td>
+                <td class="wpm-cell">${player.wpm}</td>
+                <td>${player.accuracy}%</td>
+            </tr>
+        `;
+    }).join('');
+
+    // Show/hide host buttons
+    if (multiplayerState.isHost) {
+        playAgainBtn.classList.remove('hidden');
+    } else {
+        playAgainBtn.classList.add('hidden');
+    }
+
+    leaderboardOverlay.classList.remove('hidden');
+}
+
+// Reset Room for New Race (Host Only)
+async function resetRoomForNewRace() {
+    if (!multiplayerState.isHost || !multiplayerState.roomId) return;
+
+    const newWords = generateRoomWords(50);
+
+    try {
+        // Reset room state - using compat API
+        await window.db.ref(`rooms/${multiplayerState.roomId}`).update({
+            state: 'waiting',
+            words: newWords,
+            startTime: null
+        });
+
+        // Reset all players
+        const playersSnapshot = await window.db.ref(`rooms/${multiplayerState.roomId}/players`).get();
+        if (playersSnapshot.exists()) {
+            const players = playersSnapshot.val();
+            for (const playerId of Object.keys(players)) {
+                await window.db.ref(`rooms/${multiplayerState.roomId}/players/${playerId}`).update({
+                    progress: 0,
+                    wpm: 0,
+                    accuracy: 100,
+                    finished: false,
+                    finishTime: null
+                });
+            }
+        }
+
+        document.getElementById('leaderboard-overlay').classList.add('hidden');
+
+        // Reset guard flags for new race
+        multiplayerState.raceStarted = false;
+        multiplayerState.leaderboardShown = false;
+
+        showLobby();
+        showWaitingRoom();
+
+    } catch (error) {
+        console.error("Failed to reset room:", error);
+        alert('Failed to reset room: ' + error.message);
+    }
+}
+
+// Export for global access
+window.multiplayerState = multiplayerState;
+window.createRoom = createRoom;
+window.joinRoom = joinRoom;
+window.leaveRoom = leaveRoom;
