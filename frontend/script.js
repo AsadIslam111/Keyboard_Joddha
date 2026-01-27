@@ -922,6 +922,9 @@ function endGame() {
     // Reset Analysis Box
     const analysisBox = document.getElementById('gemini-analysis');
     if (analysisBox) analysisBox.innerHTML = '';
+
+    // Save mistake history to Firestore for logged-in users
+    saveMistakeHistory();
 }
 
 async function triggerGeminiAnalysis() {
@@ -1307,7 +1310,82 @@ function getTypingSessionSummary() {
 
 window.getTypingSessionSummary = getTypingSessionSummary;
 
-window.getTypingSessionSummary = getTypingSessionSummary;
+// --- User-Specific Mistake History Storage ---
+
+// Save mistake history to Firestore for the current user
+async function saveMistakeHistory() {
+    const user = window.auth?.currentUser;
+    if (!user || !window.firestore) {
+        console.log("Cannot save mistake history: user not logged in or Firestore unavailable");
+        return;
+    }
+
+    try {
+        await window.firestore.collection('users').doc(user.uid).set({
+            mistakeHistory: mistakeHistory,
+            keyStats: keyStats,
+            updatedAt: Date.now()
+        }, { merge: true });
+        console.log("Mistake history saved for user:", user.uid);
+    } catch (error) {
+        console.error("Failed to save mistake history:", error);
+    }
+}
+
+// Load mistake history from Firestore for the current user
+async function loadMistakeHistory() {
+    const user = window.auth?.currentUser;
+    if (!user || !window.firestore) {
+        console.log("Cannot load mistake history: user not logged in or Firestore unavailable");
+        return;
+    }
+
+    try {
+        const doc = await window.firestore.collection('users').doc(user.uid).get();
+        if (doc.exists) {
+            const data = doc.data();
+
+            // Merge with existing in-memory data
+            if (data.mistakeHistory) {
+                if (data.mistakeHistory.characters) {
+                    Object.entries(data.mistakeHistory.characters).forEach(([char, count]) => {
+                        mistakeHistory.characters[char] = (mistakeHistory.characters[char] || 0) + count;
+                    });
+                }
+                if (data.mistakeHistory.words) {
+                    Object.entries(data.mistakeHistory.words).forEach(([word, count]) => {
+                        mistakeHistory.words[word] = (mistakeHistory.words[word] || 0) + count;
+                    });
+                }
+            }
+
+            if (data.keyStats) {
+                Object.entries(data.keyStats).forEach(([key, stats]) => {
+                    if (!keyStats[key]) {
+                        keyStats[key] = { total: 0, wrong: 0 };
+                    }
+                    keyStats[key].total += stats.total || 0;
+                    keyStats[key].wrong += stats.wrong || 0;
+                });
+            }
+
+            console.log("Mistake history loaded for user:", user.uid);
+            updateKeyboardHeatmap(); // Update keyboard colors with loaded data
+        } else {
+            console.log("No saved mistake history found for user:", user.uid);
+        }
+    } catch (error) {
+        console.error("Failed to load mistake history:", error);
+    }
+}
+
+// Clear in-memory mistake history (called on logout for privacy)
+function clearMistakeHistory() {
+    mistakeHistory = { characters: {}, words: {} };
+    keyStats = {};
+    window.keyStats = keyStats;
+    console.log("Mistake history cleared");
+}
 
 // --- Authentication Logic ---
 function initAuth() {
@@ -1362,7 +1440,7 @@ function initAuth() {
         }
 
         // Auth State Monitor
-        onAuthStateChanged(auth, (user) => {
+        onAuthStateChanged(auth, async (user) => {
             if (user) {
                 console.log("User signed in:", user.displayName);
                 if (loginBtn) loginBtn.style.display = 'none';
@@ -1372,6 +1450,9 @@ function initAuth() {
                 }
                 if (userAvatar) userAvatar.src = user.photoURL || 'https://via.placeholder.com/32';
                 if (userName) userName.innerText = user.displayName ? user.displayName.split(' ')[0] : 'User';
+
+                // Load user's mistake history from Firestore
+                await loadMistakeHistory();
             } else {
                 console.log("User signed out");
                 if (loginBtn) {
@@ -1382,6 +1463,9 @@ function initAuth() {
                     authInfo.classList.add('hidden');
                     authInfo.style.display = 'none';
                 }
+
+                // Clear mistake history for privacy
+                clearMistakeHistory();
             }
         });
 
