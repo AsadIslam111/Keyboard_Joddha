@@ -124,22 +124,28 @@ let wordsDiv, timerEl, modeSelect, hiddenInput, caret, resultOverlay, restartBtn
 
 // --- Helper Functions ---
 
+// Check if AI should be used (logged-in users only)
+function isAIEnabled() {
+    return window.AIService?.isUserLoggedIn() && CONFIG.language === 'english';
+}
+
 function parseMode() {
     const val = modeSelect.value;
+    const aiThemeSelect = document.getElementById('ai-theme-select');
 
-    // Config language is now handled separately via toggle
-    // Unless we want 'weak-words' to force English?
-    // Let's keep language independent unless weak-words has no Bangla support (for now)
+    // Show AI theme selector only for logged-in users with English language
+    if (aiThemeSelect) {
+        if (isAIEnabled()) {
+            aiThemeSelect.classList.remove('hidden');
+        } else {
+            aiThemeSelect.classList.add('hidden');
+        }
+    }
 
     if (val === 'weak-words') {
         CONFIG.mode = 'weak';
         CONFIG.value = 25;
         CONFIG.wordCount = 25;
-        // Force English for weak words for now as tracking is language specfic?
-        // Or just let it try? Mistake history has "words".
-        // If I switch to Bangla, I won't have matched Bangla words in history yet.
-        // Let's leave LANGUAGE as is, but if Weak Mode selected in Bangla, 
-        // it might show nothing if no history.
     } else {
         const parts = val.split('-');
         CONFIG.mode = parts[0];
@@ -204,6 +210,7 @@ function generateWords(fixedList = null) {
         return list;
     }
 
+    // For AI modes, return default words (async generation happens in resetTest)
     const list = [];
     for (let i = 0; i < CONFIG.wordCount; i++) {
         list.push(wordsList[Math.floor(Math.random() * wordsList.length)]);
@@ -211,9 +218,76 @@ function generateWords(fixedList = null) {
     return list;
 }
 
+// Async word generation for AI-enhanced modes
+async function generateWordsAsync() {
+    // Only use AI if user is logged in
+    if (!isAIEnabled()) {
+        return generateWords();
+    }
+
+    const aiThemeSelect = document.getElementById('ai-theme-select');
+    const theme = aiThemeSelect?.value || 'general';
+
+    try {
+        // Get adaptive difficulty level based on session history
+        let difficulty = 'medium';
+        if (sessionHistory.length >= 3) {
+            const diffResult = await window.AIService.getDifficultyLevel(sessionHistory);
+            difficulty = diffResult?.level || 'medium';
+            console.log('AI Adaptive Difficulty:', difficulty, diffResult?.reason);
+        }
+
+        // For Weak Words mode, use personalized practice
+        if (CONFIG.mode === 'weak') {
+            const result = await window.AIService.getPersonalizedPractice(mistakeHistory, keyStats);
+            if (result?.practiceWords && result.practiceWords.length > 0) {
+                console.log('AI Personalized Practice:', result.focusAreas);
+                if (result.tip) {
+                    console.log('AI Tip:', result.tip);
+                }
+                return result.practiceWords;
+            }
+        } else {
+            // For other modes, use smart text generation
+            const words = await window.AIService.generateSmartText(theme, CONFIG.wordCount, difficulty);
+            if (words && words.length > 0) {
+                console.log('AI Smart Text generated:', words.length, 'words');
+                return words;
+            }
+        }
+    } catch (error) {
+        console.error('AI word generation failed:', error);
+    }
+
+    // Fallback to regular words
+    console.log('Falling back to regular word generation');
+    return generateWords();
+}
+
 function renderWords() {
     wordsDiv.innerHTML = '';
-    state.words.forEach((word) => {
+    state.words.forEach((word, wordIdx) => {
+        const wordDiv = document.createElement('div');
+        wordDiv.className = 'word';
+        word.split('').forEach((char, charIdx) => {
+            const charSpan = document.createElement('span');
+            charSpan.className = 'letter';
+            charSpan.innerText = char;
+            wordDiv.appendChild(charSpan);
+        });
+        wordsDiv.appendChild(wordDiv);
+    });
+
+    // Set active on first character
+    if (wordsDiv.children.length > 0 && wordsDiv.children[0].children.length > 0) {
+        wordsDiv.children[0].children[0].classList.add('active');
+    }
+    document.body.style.borderTop = "5px solid blue"; // DEBUG: Words Rendered
+}
+
+// Append new words without clearing existing ones (for time mode)
+function appendNewWords(newWords) {
+    newWords.forEach((word) => {
         const wordDiv = document.createElement('div');
         wordDiv.className = 'word';
         word.split('').forEach(char => {
@@ -224,19 +298,27 @@ function renderWords() {
         });
         wordsDiv.appendChild(wordDiv);
     });
-
-    if (wordsDiv.children.length > 0 && wordsDiv.children[0].children.length > 0) {
-        wordsDiv.children[0].children[0].classList.add('active');
-    }
-    document.body.style.borderTop = "5px solid blue"; // DEBUG: Words Rendered
 }
 
-function resetTest() {
+async function resetTest() {
     clearInterval(state.timer);
     parseMode();
 
+    // Show loading for AI-enhanced modes (logged-in users)
+    if (isAIEnabled()) {
+        wordsDiv.innerHTML = '<div class="loading-ai">🤖 Generating AI words...</div>';
+    }
+
+    // Generate words (async if AI is enabled for logged-in users)
+    let words;
+    if (isAIEnabled()) {
+        words = await generateWordsAsync();
+    } else {
+        words = generateWords();
+    }
+
     state = {
-        words: generateWords(),
+        words: words,
         wordIndex: 0,
         charIndex: 0,
         startTime: null,
@@ -259,9 +341,14 @@ function resetTest() {
     document.getElementById('insights').innerHTML = '';
 
     resultOverlay.classList.add('hidden');
-    if (visualKeyboard) visualKeyboard.classList.remove('hidden');
+    // Hide keyboard during testing (will show in results with heatmap)
+    if (visualKeyboard) visualKeyboard.classList.add('hidden');
     hiddenInput.value = '';
     hiddenInput.focus();
+
+    // Reset scroll position
+    if (wordsDiv) wordsDiv.style.transform = 'translateY(0)';
+
     renderWords();
     updateCaretPosition();
 }
@@ -461,8 +548,16 @@ function handleInput(e) {
         if (state.wordIndex >= state.words.length) {
             if (CONFIG.mode === 'words' || CONFIG.mode === 'weak') {
                 endGame();
+                return;
             }
-            return;
+            // In time mode, generate more words when running out
+            if (CONFIG.mode === 'time') {
+                console.log('Time mode: generating more words...');
+                const newWords = generateWords();
+                state.words = state.words.concat(newWords);
+                appendNewWords(newWords); // Append without clearing existing words
+                updateCaretPosition();
+            }
         }
     } else {
         if (CONFIG.language === 'bangla') {
@@ -584,7 +679,21 @@ function handleInput(e) {
 function updateCaretPosition() {
     const currentWordDiv = wordsDiv.children[state.wordIndex];
     if (currentWordDiv) {
-        const containerRect = wordsDiv.parentElement.getBoundingClientRect();
+        const container = wordsDiv.parentElement; // .typing-display
+        const containerRect = container.getBoundingClientRect();
+
+        // First: Check if we need to scroll
+        const wordRect = currentWordDiv.getBoundingClientRect();
+
+        // If the current word is below the visible area, scroll down
+        if (wordRect.bottom > containerRect.bottom - 20) {
+            // Calculate how much to scroll based on offsetTop (not affected by transform)
+            const scrollAmount = currentWordDiv.offsetTop - 40; // Keep some padding at top
+            wordsDiv.style.transform = `translateY(-${Math.max(0, scrollAmount)}px)`;
+        }
+
+        // Second: Calculate caret position AFTER any scroll transform
+        // Need to get fresh rect after transform
         let targetRect;
 
         if (state.charIndex < currentWordDiv.children.length) {
@@ -605,8 +714,10 @@ function updateCaretPosition() {
             }
         }
 
-        caret.style.left = (targetRect.left - containerRect.left) + 'px';
-        caret.style.top = (targetRect.top - containerRect.top) + 'px';
+        // Get fresh container rect after transform
+        const updatedContainerRect = container.getBoundingClientRect();
+        caret.style.left = (targetRect.left - updatedContainerRect.left) + 'px';
+        caret.style.top = (targetRect.top - updatedContainerRect.top) + 'px';
     }
 }
 
@@ -891,11 +1002,10 @@ function endGame() {
     document.getElementById('result-acc').innerText = acc + '%';
     document.getElementById('result-errors').innerText = state.incorrectChars;
 
-    updateKeyboardHeatmap(); // Update visual keyboard
+    // Show keyboard with heatmap in result page
+    updateKeyboardHeatmap();
+    if (visualKeyboard) visualKeyboard.classList.remove('hidden');
 
-    updateKeyboardHeatmap(); // Update visual keyboard
-
-    if (visualKeyboard) visualKeyboard.classList.add('hidden');
     resultOverlay.classList.remove('hidden');
     hiddenInput.blur();
 
@@ -1228,6 +1338,15 @@ function init() {
     }
 
     if (restartBtn) restartBtn.addEventListener('click', resetTest);
+
+    // AI Theme Selector (for logged-in users)
+    const aiThemeSelect = document.getElementById('ai-theme-select');
+    if (aiThemeSelect) {
+        aiThemeSelect.addEventListener('change', () => {
+            if (isAIEnabled()) resetTest();
+        });
+    }
+
     window.addEventListener('resize', updateCaretPosition);
 
     if (langEnBtn) langEnBtn.addEventListener('click', () => setLanguage('english'));

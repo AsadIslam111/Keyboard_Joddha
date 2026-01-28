@@ -19,6 +19,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     <script src="firebase_config.js"></script>
     <script src="phonetic_engine.js" defer></script>
+    <script src="ai_service.js" defer></script>
     <script src="script.js" defer></script>
 </head>
 
@@ -66,6 +67,15 @@
                 <option value="words-25">Words 25</option>
                 <option value="words-50">Words 50</option>
                 <option value="weak-words">Weak Words</option>
+            </select>
+
+            <!-- AI Theme Selector (Shows when logged in) -->
+            <select id="ai-theme-select" class="mode-select hidden">
+                <option value="general">📝 General</option>
+                <option value="tech">💻 Tech</option>
+                <option value="academic">📚 Academic</option>
+                <option value="creative">🎨 Creative</option>
+                <option value="business">💼 Business</option>
             </select>
 
             <!-- Multiplayer Button -->

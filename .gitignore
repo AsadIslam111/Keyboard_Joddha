@@ -1,1 +1,7 @@
-firebase_config.js
+# Config files with API keys
+frontend/firebase_config.js
+frontend/ai_service.js
+
+# Environment files
+.env
+.env.local
