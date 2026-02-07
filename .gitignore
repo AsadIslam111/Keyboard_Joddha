@@ -1,4 +1,8 @@
-# Config files with API keys
+# Config files with API keys (root level)
+firebase_config.js
+ai_service.js
+
+# Config files with API keys (frontend folder)
 frontend/firebase_config.js
 frontend/ai_service.js
 
